@@ -43,6 +43,9 @@ dependencies:
   collection: ^1.18.0
   intl: ^0.18.1
   url_launcher: ^6.2.1
+  
+  # 压缩文件支持
+  archive: ^3.4.0
 
 dev_dependencies:
   flutter_test:

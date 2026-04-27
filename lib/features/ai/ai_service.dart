@@ -1,7 +1,9 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:path/path.dart' as p;
 
 /// AI消息
 class AIMessage {
@@ -27,6 +29,35 @@ class AIModelConfig {
   });
 }
 
+/// 项目结构模板
+class ProjectTemplate {
+  final String name;
+  final String description;
+  final Map<String, String> files; // path -> content
+  
+  ProjectTemplate({
+    required this.name,
+    required this.description,
+    required this.files,
+  });
+}
+
+/// AI意图识别结果
+class AIIntent {
+  final AIIntentType type;
+  final Map<String, dynamic> params;
+  
+  AIIntent({required this.type, required this.params});
+}
+
+enum AIIntentType {
+  createProject,
+  generateCode,
+  explainCode,
+  chat,
+  unknown,
+}
+
 /// AI服务 - 支持多模型
 class AIService {
   static final AIService _instance = AIService._internal();
@@ -36,6 +67,10 @@ class AIService {
   String _selectedModel = 'DeepSeek';
   String _apiKey = '';
   bool _isInitialized = false;
+  
+  // AI回调函数
+  Function(String)? onProjectCreated;
+  Function(String, String)? onCodeGenerated;
 
   final Map<String, AIModelConfig> _models = {
     'DeepSeek': AIModelConfig(
@@ -94,15 +129,104 @@ class AIService {
     ),
   };
 
+  /// 项目模板库
+  final Map<String, ProjectTemplate> _projectTemplates = {
+    'flutter': ProjectTemplate(
+      name: 'Flutter App',
+      description: '创建一个基本的Flutter应用',
+      files: {
+        'lib/main.dart': '''import 'package:flutter/material.dart';
+
+void main() {
+  runApp(const MyApp());
+}
+
+class MyApp extends StatelessWidget {
+  const MyApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'My App',
+      home: Scaffold(
+        appBar: AppBar(title: const Text('Home')),
+        body: const Center(child: Text('Hello Flutter!')),
+      ),
+    );
+  }
+}
+''',
+        'pubspec.yaml': '''name: my_app
+description: A new Flutter project.
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true
+''',
+      },
+    ),
+    'python': ProjectTemplate(
+      name: 'Python Project',
+      description: '创建一个Python项目',
+      files: {
+        'main.py': '''#!/usr/bin/env python3
+"""
+Main application file
+"""
+
+def main():
+    print("Hello, Python!")
+
+if __name__ == '__main__':
+    main()
+''',
+        'requirements.txt': '',
+        'README.md': '# Python Project\n',
+      },
+    ),
+    'nodejs': ProjectTemplate(
+      name: 'Node.js Project',
+      description: '创建一个Node.js项目',
+      files: {
+        'index.js': '''/**
+ * Main application file
+ */
+
+function main() {
+  console.log("Hello, Node.js!");
+}
+
+main();
+''',
+        'package.json': '''{
+  "name": "my-app",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  }
+}
+''',
+      },
+    ),
+  };
+
   /// 初始化
   Future<void> init() async {
     if (_isInitialized) return;
     try {
       final prefs = await SharedPreferences.getInstance();
       _selectedModel = prefs.getString('ai_selected_model') ?? 'DeepSeek';
-      _apiKey = prefs.getString('ai_api_key_${_selectedModel}') ?? '';
+      _apiKey = prefs.getString('ai_api_key_\$_selectedModel') ?? '';
     } catch (e) {
-      debugPrint('AI Service init error: $e');
+      debugPrint('AI Service init error: \$e');
     }
     _isInitialized = true;
   }
@@ -119,6 +243,9 @@ class AIService {
   /// 获取所有模型名称
   List<String> get modelNames => _models.keys.toList();
 
+  /// 获取所有项目模板名称
+  List<String> get templateNames => _projectTemplates.keys.toList();
+
   /// 切换模型
   Future<void> setModel(String modelName) async {
     if (!_models.containsKey(modelName)) return;
@@ -126,9 +253,9 @@ class AIService {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('ai_selected_model', modelName);
-      _apiKey = prefs.getString('ai_api_key_$modelName') ?? '';
+      _apiKey = prefs.getString('ai_api_key_\$modelName') ?? '';
     } catch (e) {
-      debugPrint('Set model error: $e');
+      debugPrint('Set model error: \$e');
     }
   }
 
@@ -137,12 +264,210 @@ class AIService {
     try {
       _apiKey = apiKey.trim();
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('ai_api_key_$_selectedModel', apiKey.trim());
-      debugPrint('API Key saved for $_selectedModel: ${apiKey.substring(0, apiKey.length > 10 ? 10 : apiKey.length)}...');
+      await prefs.setString('ai_api_key_\$_selectedModel', apiKey.trim());
+      debugPrint('API Key saved for \$_selectedModel');
       return true;
     } catch (e) {
-      debugPrint('Failed to save API Key: $e');
+      debugPrint('Failed to save API Key: \$e');
       return false;
+    }
+  }
+
+  /// 识别用户意图
+  AIIntent recognizeIntent(String message) {
+    final lowerMessage = message.toLowerCase();
+    
+    // 创建项目意图
+    if (lowerMessage.contains('创建') && 
+        (lowerMessage.contains('项目') || lowerMessage.contains('工程'))) {
+      String template = 'flutter';
+      if (lowerMessage.contains('python')) template = 'python';
+      if (lowerMessage.contains('node') || lowerMessage.contains('nodejs')) template = 'nodejs';
+      
+      // 尝试提取项目名称
+      String projectName = 'my_project';
+      final nameMatch = RegExp(r'(?:叫|名称|名字为?|名为)([^，,。\s]+)').firstMatch(message);
+      if (nameMatch != null) {
+        projectName = nameMatch.group(1) ?? 'my_project';
+      }
+      
+      return AIIntent(
+        type: AIIntentType.createProject,
+        params: {'template': template, 'name': projectName},
+      );
+    }
+    
+    // 生成代码意图
+    if (lowerMessage.contains('生成') && 
+        (lowerMessage.contains('代码') || lowerMessage.contains('写'))) {
+      String language = 'dart';
+      if (lowerMessage.contains('python') || lowerMessage.contains('.py')) language = 'python';
+      if (lowerMessage.contains('java')) language = 'java';
+      if (lowerMessage.contains('javascript') || lowerMessage.contains('.js')) language = 'javascript';
+      if (lowerMessage.contains('go') || lowerMessage.contains('.go')) language = 'go';
+      
+      return AIIntent(
+        type: AIIntentType.generateCode,
+        params: {'language': language, 'description': message},
+      );
+    }
+    
+    // 解释代码意图
+    if (lowerMessage.contains('解释') || 
+        lowerMessage.contains('说明') ||
+        lowerMessage.contains('看懂')) {
+      if (lowerMessage.contains('代码')) {
+        return AIIntent(
+          type: AIIntentType.explainCode,
+          params: {},
+        );
+      }
+    }
+    
+    return AIIntent(type: AIIntentType.chat, params: {});
+  }
+
+  /// 创建项目
+  Future<String> createProject(String projectPath, String templateName) async {
+    final template = _projectTemplates[templateName];
+    if (template == null) {
+      return '未找到模板: \$templateName';
+    }
+    
+    try {
+      // 创建项目目录
+      final dir = Directory(projectPath);
+      if (await dir.exists()) {
+        return '目录已存在: \$projectPath';
+      }
+      
+      await dir.create(recursive: true);
+      
+      // 创建所有文件
+      for (final entry in template.files.entries) {
+        final filePath = p.join(projectPath, entry.key);
+        final file = File(filePath);
+        await file.parent.create(recursive: true);
+        await file.writeAsString(entry.value);
+      }
+      
+      // 回调通知
+      onProjectCreated?.call(projectPath);
+      
+      return '项目已创建: \$projectPath\n\n模板: \${template.name}\n文件数: \${template.files.length}';
+    } catch (e) {
+      return '创建失败: \$e';
+    }
+  }
+
+  /// 使用AI生成项目
+  Future<String> generateProjectWithAI(String projectPath, String description) async {
+    if (!isConfigured) {
+      return '请先配置AI API Key';
+    }
+    
+    try {
+      // 向AI询问项目结构
+      final prompt = '''请为以下项目生成代码结构：
+      
+描述: \$description
+
+请生成一个完整的项目结构，包括所有必要的文件。
+回复格式要求：
+1. 首先说明项目类型和建议的文件结构
+2. 然后列出每个文件的完整内容
+3. 使用以下标记格式：
+
+【文件: 文件路径】
+文件内容...
+【文件结束】
+
+请确保代码可以直接使用。''';
+      
+      final response = await chat(prompt);
+      
+      // 解析AI响应并创建文件
+      final filePattern = RegExp(r'【文件:\s*(.+?)】(.*?)【文件结束】', dotAll: true);
+      final matches = filePattern.allMatches(response);
+      
+      if (matches.isEmpty) {
+        // 没有找到文件格式，返回原始响应
+        return response;
+      }
+      
+      // 创建项目目录
+      final dir = Directory(projectPath);
+      await dir.create(recursive: true);
+      
+      // 创建每个文件
+      for (final match in matches) {
+        final filePath = match.group(1)?.trim() ?? '';
+        final content = match.group(2)?.trim() ?? '';
+        
+        if (filePath.isNotEmpty && content.isNotEmpty) {
+          final fullPath = p.join(projectPath, filePath);
+          final file = File(fullPath);
+          await file.parent.create(recursive: true);
+          await file.writeAsString(content);
+        }
+      }
+      
+      // 回调通知
+      onProjectCreated?.call(projectPath);
+      
+      return '项目已创建: \$projectPath\n\n共生成 \${matches.length} 个文件';
+    } catch (e) {
+      return '生成失败: \$e';
+    }
+  }
+
+  /// 使用AI生成代码
+  Future<String> generateCode(String language, String description) async {
+    if (!isConfigured) {
+      return '请先配置AI API Key';
+    }
+    
+    try {
+      final prompt = '''请生成一段 \$language 代码：
+
+需求: \$description
+
+请生成完整可用的代码，并简要说明使用方法。''';
+      
+      final response = await chat(prompt);
+      
+      // 如果AI生成了代码，触发回调
+      if (response.contains('```')) {
+        onCodeGenerated?.call(language, response);
+      }
+      
+      return response;
+    } catch (e) {
+      return '生成失败: \$e';
+    }
+  }
+
+  /// 解释代码
+  Future<String> explainCode(String code) async {
+    if (!isConfigured) {
+      return '请先配置AI API Key';
+    }
+    
+    try {
+      final prompt = '''请解释以下代码的功能和工作原理：
+
+\`\`\`
+\$code
+\`\`\`
+
+请用简洁易懂的语言解释，包括：
+1. 代码的主要功能
+2. 关键代码段的作用
+3. 代码的运行流程''';
+      
+      return await chat(prompt);
+    } catch (e) {
+      return '解释失败: \$e';
     }
   }
 
@@ -154,11 +479,11 @@ class AIService {
     }
 
     if (_apiKey.isEmpty && config.provider != 'ollama') {
-      return '请先在设置中配置 ${config.name} 的 API Key。\n\n获取地址：${_getKeyUrl(config.name)}';
+      return '请先在设置中配置 \${config.name} 的 API Key。\n\n获取地址：\${_getKeyUrl(config.name)}';
     }
 
     try {
-      debugPrint('Sending request to ${config.name}...');
+      debugPrint('Sending request to \${config.name}...');
       String response;
       
       switch (config.provider) {
@@ -187,11 +512,11 @@ class AIService {
           response = await _chatDeepSeek(config, userMessage, history);
       }
       
-      debugPrint('Response received: ${response.substring(0, response.length > 50 ? 50 : response.length)}...');
+      debugPrint('Response received');
       return response;
     } catch (e) {
-      debugPrint('Chat error: $e');
-      return '请求失败: $e\n\n请检查API Key是否正确';
+      debugPrint('Chat error: \$e');
+      return '请求失败: \$e\n\n请检查API Key是否正确';
     }
   }
 
@@ -225,17 +550,17 @@ class AIService {
       Uri.parse(config.apiEndpoint),
       headers: {
         'Content-Type': 'application/json; charset=utf-8',
-        'Authorization': 'Bearer $_apiKey',
+        'Authorization': 'Bearer \$_apiKey',
       },
       body: utf8.encode(jsonEncode({
         'model': config.modelId,
         'messages': messages,
         'temperature': 0.7,
-        'max_tokens': 2048,
+        'max_tokens': 4096,
       })),
     );
 
-    debugPrint('DeepSeek response status: ${response.statusCode}');
+    debugPrint('DeepSeek response status: \${response.statusCode}');
     
     if (response.statusCode == 200) {
       final body = utf8.decode(response.bodyBytes);
@@ -243,7 +568,7 @@ class AIService {
       return data['choices'][0]['message']['content'] ?? '无响应内容';
     } else {
       final body = utf8.decode(response.bodyBytes);
-      return 'API错误 (${response.statusCode}): $body';
+      return 'API错误 (\${response.statusCode}): \$body';
     }
   }
 
@@ -263,13 +588,13 @@ class AIService {
       Uri.parse(config.apiEndpoint),
       headers: {
         'Content-Type': 'application/json; charset=utf-8',
-        'Authorization': 'Bearer $_apiKey',
+        'Authorization': 'Bearer \$_apiKey',
       },
       body: utf8.encode(jsonEncode({
         'model': config.modelId,
         'messages': messages,
         'temperature': 0.7,
-        'max_tokens': 2048,
+        'max_tokens': 4096,
       })),
     );
 
@@ -279,7 +604,7 @@ class AIService {
       return data['choices'][0]['message']['content'] ?? '无响应内容';
     } else {
       final body = utf8.decode(response.bodyBytes);
-      return 'API错误 (${response.statusCode}): $body';
+      return 'API错误 (\${response.statusCode}): \$body';
     }
   }
 
@@ -293,7 +618,7 @@ class AIService {
       Uri.parse(config.apiEndpoint),
       headers: {
         'Content-Type': 'application/json; charset=utf-8',
-        'Authorization': 'Bearer $_apiKey',
+        'Authorization': 'Bearer \$_apiKey',
       },
       body: utf8.encode(jsonEncode({
         'model': config.modelId,
@@ -309,16 +634,15 @@ class AIService {
     if (response.statusCode == 200) {
       final body = utf8.decode(response.bodyBytes);
       final data = jsonDecode(body);
-      // 通义千问返回格式可能是 output.text 或 output.choices
       if (data['output'] != null) {
         return data['output']['text'] ?? 
                data['output']['choices']?[0]?['message']?['content'] ?? 
                '无响应';
       }
-      return '响应格式错误: $body';
+      return '响应格式错误: \$body';
     } else {
       final body = utf8.decode(response.bodyBytes);
-      return 'API错误 (${response.statusCode}): $body';
+      return 'API错误 (\${response.statusCode}): \$body';
     }
   }
 
@@ -332,7 +656,7 @@ class AIService {
       Uri.parse(config.apiEndpoint),
       headers: {
         'Content-Type': 'application/json; charset=utf-8',
-        'Authorization': 'Bearer $_apiKey',
+        'Authorization': 'Bearer \$_apiKey',
       },
       body: utf8.encode(jsonEncode({
         'model': config.modelId,
@@ -348,7 +672,7 @@ class AIService {
       return data['choices'][0]['message']['content'] ?? '无响应';
     } else {
       final body = utf8.decode(response.bodyBytes);
-      return 'API错误 (${response.statusCode}): $body';
+      return 'API错误 (\${response.statusCode}): \$body';
     }
   }
 
@@ -358,7 +682,7 @@ class AIService {
     String userMessage,
     List<AIMessage>? history,
   ) async {
-    final url = '${config.apiEndpoint}?key=$_apiKey';
+    final url = '\${config.apiEndpoint}?key=\$_apiKey';
     
     final response = await http.post(
       Uri.parse(url),
@@ -380,7 +704,7 @@ class AIService {
       return data['candidates'][0]['content']['parts'][0]['text'] ?? '无响应';
     } else {
       final body = utf8.decode(response.bodyBytes);
-      return 'API错误 (${response.statusCode}): $body';
+      return 'API错误 (\${response.statusCode}): \$body';
     }
   }
 
@@ -399,7 +723,7 @@ class AIService {
       },
       body: utf8.encode(jsonEncode({
         'model': config.modelId,
-        'max_tokens': 2048,
+        'max_tokens': 4096,
         'messages': [
           {'role': 'user', 'content': userMessage}
         ],
@@ -412,7 +736,7 @@ class AIService {
       return data['content'][0]['text'] ?? '无响应';
     } else {
       final body = utf8.decode(response.bodyBytes);
-      return 'API错误 (${response.statusCode}): $body';
+      return 'API错误 (\${response.statusCode}): \$body';
     }
   }
 

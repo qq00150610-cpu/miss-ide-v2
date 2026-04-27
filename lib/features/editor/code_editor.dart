@@ -129,7 +129,7 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
           Container(
             height: 32,
             padding: const EdgeInsets.symmetric(horizontal: 8),
-            color: Theme.of(context).colorScheme.surfaceContainerHighest,
+            color: Theme.of(context).colorScheme.surfaceVariant,
             child: Row(
               children: [
                 Text(_currentLanguage, style: const TextStyle(fontSize: 11)),

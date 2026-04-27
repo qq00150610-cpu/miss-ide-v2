@@ -1,6 +1,10 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
+
+/// 文件操作回调
+typedef FileOperationCallback = void Function(String path, String operation);
 
 /// 文件树项
 class FileTreeItem {
@@ -23,11 +27,13 @@ class FileTreeItem {
 class ProjectDirectoryPanel extends StatefulWidget {
   final String projectPath;
   final Function(String) onFileSelected;
+  final FileOperationCallback? onFileOperation;
 
   const ProjectDirectoryPanel({
     super.key,
     required this.projectPath,
     required this.onFileSelected,
+    this.onFileOperation,
   });
 
   @override
@@ -169,6 +175,7 @@ class _ProjectDirectoryPanelState extends State<ProjectDirectoryPanel> {
     } else {
       return InkWell(
         onTap: () => widget.onFileSelected(item.path),
+        onLongPress: () => _showFileContextMenu(context, item),
         child: Padding(
           padding: EdgeInsets.only(left: indent + 28, top: 8, bottom: 8, right: 8),
           child: Row(
@@ -186,6 +193,171 @@ class _ProjectDirectoryPanelState extends State<ProjectDirectoryPanel> {
           ),
         ),
       );
+    }
+  }
+
+  /// 显示文件上下文菜单
+  void _showFileContextMenu(BuildContext context, FileTreeItem item) {
+    final RenderBox overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
+    final RenderBox button = context.findRenderObject() as RenderBox;
+    final Offset position = button.localToGlobal(Offset.zero, ancestor: overlay);
+    
+    showMenu<String>(
+      context: context,
+      position: RelativeRect.fromRect(
+        Rect.fromLTWH(position.dx, position.dy, button.size.width, button.size.height),
+        Offset.zero & overlay.size,
+      ),
+      items: _buildContextMenuItems(item),
+    ).then((value) {
+      if (value != null) {
+        _handleContextMenuAction(item, value);
+      }
+    });
+  }
+
+  /// 构建上下文菜单项
+  List<PopupMenuEntry<String>> _buildContextMenuItems(FileTreeItem item) {
+    final ext = p.extension(item.name).toLowerCase();
+    final isCodeFile = ['.dart', '.java', '.kt', '.py', '.js', '.ts', '.xml', '.json', '.yaml', '.yml', '.gradle', '.md'].contains(ext);
+    
+    return [
+      PopupMenuItem(
+        value: 'open',
+        child: Row(
+          children: [
+            const Icon(Icons.open_in_new, size: 18),
+            const SizedBox(width: 12),
+            const Text('打开'),
+          ],
+        ),
+      ),
+      if (isCodeFile) ...[
+        const PopupMenuDivider(),
+        PopupMenuItem(
+          value: 'ai_edit',
+          child: Row(
+            children: [
+              Icon(Icons.auto_fix_high, size: 18, color: Colors.purple),
+              const SizedBox(width: 12),
+              const Text('AI 编辑'),
+            ],
+          ),
+        ),
+        PopupMenuItem(
+          value: 'ai_explain',
+          child: Row(
+            children: [
+              Icon(Icons.psychology, size: 18, color: Colors.blue),
+              const SizedBox(width: 12),
+              const Text('AI 解释'),
+            ],
+          ),
+        ),
+        PopupMenuItem(
+          value: 'ai_refactor',
+          child: Row(
+            children: [
+              Icon(Icons.transform, size: 18, color: Colors.green),
+              const SizedBox(width: 12),
+              const Text('AI 重构'),
+            ],
+          ),
+        ),
+        PopupMenuItem(
+          value: 'ai_fix',
+          child: Row(
+            children: [
+              Icon(Icons.build, size: 18, color: Colors.orange),
+              const SizedBox(width: 12),
+              const Text('AI 修复'),
+            ],
+          ),
+        ),
+      ],
+      const PopupMenuDivider(),
+      PopupMenuItem(
+        value: 'copy_path',
+        child: Row(
+          children: [
+            const Icon(Icons.copy, size: 18),
+            const SizedBox(width: 12),
+            const Text('复制路径'),
+          ],
+        ),
+      ),
+      PopupMenuItem(
+        value: 'delete',
+          child: Row(
+            children: [
+              Icon(Icons.delete, size: 18, color: Colors.red),
+              const SizedBox(width: 12),
+              Text('删除', style: TextStyle(color: Colors.red)),
+            ],
+          ),
+      ),
+    ];
+  }
+
+  /// 处理菜单操作
+  void _handleContextMenuAction(FileTreeItem item, String action) {
+    switch (action) {
+      case 'open':
+        widget.onFileSelected(item.path);
+        break;
+      case 'ai_edit':
+      case 'ai_explain':
+      case 'ai_refactor':
+      case 'ai_fix':
+        widget.onFileOperation?.call(item.path, action);
+        break;
+      case 'copy_path':
+        Clipboard.setData(ClipboardData(text: item.path));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('路径已复制'), duration: Duration(seconds: 1)),
+        );
+        break;
+      case 'delete':
+        _confirmDelete(item);
+        break;
+    }
+  }
+
+  /// 确认删除文件
+  void _confirmDelete(FileTreeItem item) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('确认删除'),
+        content: Text('确定要删除 "${item.name}" 吗？'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('取消')),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('删除'),
+          ),
+        ],
+      ),
+    );
+    
+    if (confirmed == true) {
+      try {
+        final file = File(item.path);
+        await file.delete();
+        _loadDirectory();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('已删除: ${item.name}')),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('删除失败: $e'), backgroundColor: Colors.red),
+          );
+        }
+      }
     }
   }
 

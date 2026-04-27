@@ -967,6 +967,211 @@ $code
       return 'Ollama连接失败，请确保Ollama服务正在运行 (localhost:11434)';
     }
   }
+
+  /// 流式聊天 - 逐字返回响应
+  Stream<String> chatStream(String userMessage, {List<AIMessage>? history}) async* {
+    final config = _models[_selectedModel];
+    if (config == null) {
+      yield '错误：未知的模型配置';
+      return;
+    }
+
+    if (_apiKey.isEmpty && config.provider != 'ollama') {
+      yield '请先配置 API Key';
+      return;
+    }
+
+    try {
+      debugPrint('Starting stream request to ${config.name}...');
+      
+      // 根据不同的提供商使用不同的流式方法
+      switch (config.provider) {
+        case 'deepseek':
+        case 'openai':
+          yield* _streamOpenAICompatible(config, userMessage, history);
+          break;
+        case 'zhipu':
+          yield* _streamZhipu(config, userMessage, history);
+          break;
+        default:
+          // 不支持流式的模型，使用普通方法并逐字返回
+          final response = await chat(userMessage, history: history);
+          for (int i = 0; i < response.length; i++) {
+            await Future.delayed(const Duration(milliseconds: 20));
+            yield response.substring(0, i + 1);
+          }
+      }
+    } catch (e) {
+      debugPrint('Stream error: $e');
+      yield '请求失败: $e';
+    }
+  }
+
+  /// OpenAI 兼容 API 流式请求
+  Stream<String> _streamOpenAICompatible(
+    AIModelConfig config,
+    String userMessage,
+    List<AIMessage>? history,
+  ) async* {
+    final messages = <Map<String, dynamic>>[
+      {'role': 'system', 'content': '你是一个专业的编程助手，帮助用户解决代码问题。请用中文回答。'},
+      if (history != null) ...history.map((m) => m.toJson()),
+      {'role': 'user', 'content': userMessage},
+    ];
+
+    final request = http.Request('POST', Uri.parse(config.apiEndpoint));
+    request.headers['Content-Type'] = 'application/json; charset=utf-8';
+    request.headers['Authorization'] = 'Bearer $_apiKey';
+    request.bodyBytes = utf8.encode(jsonEncode({
+      'model': config.modelId,
+      'messages': messages,
+      'stream': true,
+      'temperature': 0.7,
+      'max_tokens': 4096,
+    }));
+
+    final response = await http.Client().send(request);
+    
+    await for (final chunk in response.stream.transform(utf8.decoder)) {
+      final lines = chunk.split('\n');
+      for (final line in lines) {
+        if (line.startsWith('data: ')) {
+          final data = line.substring(6).trim();
+          if (data == '[DONE]') return;
+          
+          try {
+            final json = jsonDecode(data);
+            final content = json['choices']?[0]?['delta']?['content'];
+            if (content != null) {
+              yield content;
+            }
+          } catch (e) {
+            // 解析错误，忽略
+          }
+        }
+      }
+    }
+  }
+
+  /// 智谱 API 流式请求
+  Stream<String> _streamZhipu(
+    AIModelConfig config,
+    String userMessage,
+    List<AIMessage>? history,
+  ) async* {
+    final request = http.Request('POST', Uri.parse(config.apiEndpoint));
+    request.headers['Content-Type'] = 'application/json; charset=utf-8';
+    request.headers['Authorization'] = 'Bearer $_apiKey';
+    request.bodyBytes = utf8.encode(jsonEncode({
+      'model': config.modelId,
+      'messages': [
+        {'role': 'user', 'content': userMessage}
+      ],
+      'stream': true,
+    }));
+
+    final response = await http.Client().send(request);
+    
+    await for (final chunk in response.stream.transform(utf8.decoder)) {
+      final lines = chunk.split('\n');
+      for (final line in lines) {
+        if (line.startsWith('data: ')) {
+          final data = line.substring(6).trim();
+          if (data == '[DONE]') return;
+          
+          try {
+            final json = jsonDecode(data);
+            final content = json['choices']?[0]?['delta']?['content'];
+            if (content != null) {
+              yield content;
+            }
+          } catch (e) {
+            // 解析错误，忽略
+          }
+        }
+      }
+    }
+  }
+
+  /// AI 编辑代码
+  Future<String> editCode(String code, String instruction, {String language = ''}) async {
+    final prompt = '''请根据以下指令修改代码：
+
+语言: ${language.isEmpty ? '自动检测' : language}
+
+原始代码:
+```
+$code
+```
+
+修改指令: $instruction
+
+请只返回修改后的完整代码，不要添加任何解释。''';
+
+    return await chat(prompt);
+  }
+
+  /// AI 解释代码
+  Future<String> explainCode(String code, {String language = ''}) async {
+    final prompt = '''请解释以下代码的功能和工作原理：
+
+语言: ${language.isEmpty ? '自动检测' : language}
+
+```
+$code
+```
+
+请用简洁易懂的语言解释，包括：
+1. 代码的主要功能
+2. 关键代码段的作用
+3. 代码的运行流程''';
+
+    return await chat(prompt);
+  }
+
+  /// AI 重构代码
+  Future<String> refactorCode(String code, {String language = ''}) async {
+    final prompt = '''请重构以下代码，使其更加清晰、高效、易维护：
+
+语言: ${language.isEmpty ? '自动检测' : language}
+
+```
+$code
+```
+
+重构要求：
+1. 提高代码可读性
+2. 优化性能
+3. 遵循最佳实践
+4. 保持原有功能不变
+
+请只返回重构后的代码，不要添加解释。''';
+
+    return await chat(prompt);
+  }
+
+  /// AI 修复代码
+  Future<String> fixCode(String code, {String? error, String language = ''}) async {
+    final prompt = '''请修复以下代码中的问题：
+
+语言: ${language.isEmpty ? '自动检测' : language}
+
+代码:
+```
+$code
+```
+
+${error != null ? '错误信息:\n$error' : ''}
+
+请：
+1. 找出所有问题
+2. 修复这些问题
+3. 确保代码能正常编译和运行
+
+请只返回修复后的代码，不要添加解释。''';
+
+    return await chat(prompt);
+  }
 }
 
 // 全局实例

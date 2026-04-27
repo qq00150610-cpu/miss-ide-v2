@@ -1028,7 +1028,7 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
         setState(() {
           _tabs.add(EditorTab(
             fileName: fileName,
-            path: outputPath,
+            path: outputPath!,
             content: _controller.text,
           ));
           _currentTabIndex = 0;
@@ -1037,14 +1037,14 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
         setState(() {
           _tabs[_currentTabIndex] = EditorTab(
             fileName: fileName,
-            path: outputPath,
+            path: outputPath!,
             content: _controller.text,
           );
         });
       }
       
       setState(() {
-        _currentFilePath = outputPath;
+        _currentFilePath = outputPath!;
         _currentLanguage = _getLanguage(fileName);
         _hasChanges = false;
       });

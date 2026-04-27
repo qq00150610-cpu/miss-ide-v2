@@ -973,6 +973,13 @@ class BuildService {
 
   /// 获取历史记录
   List<BuildHistoryItem> getHistory() => List.from(_buildHistory);
+  
+  /// 清空历史记录
+  Future<void> clearHistory() async {
+    _buildHistory.clear();
+    await _saveHistory();
+    _historyController.add(_buildHistory);
+  }
 }
 
 // 全局实例

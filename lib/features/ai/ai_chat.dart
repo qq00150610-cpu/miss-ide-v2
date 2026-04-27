@@ -739,6 +739,7 @@ $code
       // 识别意图
       final intent = aiService.recognizeIntent(text);
       String response;
+      List<String> createdFiles = [];
       
       switch (intent.type) {
         case AIIntentType.createProject:
@@ -766,6 +767,11 @@ $code
             intent.params['language'] ?? 'dart',
             text,
           );
+          // 自动检测并保存代码文件
+          createdFiles = await _autoSaveCodeFromResponse(response, text);
+          if (createdFiles.isNotEmpty) {
+            response += '\n\n---\n✅ 已自动保存 ${createdFiles.length} 个文件';
+          }
           break;
           
         case AIIntentType.explainCode:
@@ -781,6 +787,11 @@ $code
           
         default:
           response = await aiService.chat(text);
+          // 检查响应中是否包含代码块，自动保存
+          createdFiles = await _autoSaveCodeFromResponse(response, text);
+          if (createdFiles.isNotEmpty) {
+            response += '\n\n---\n✅ 已自动保存 ${createdFiles.length} 个文件';
+          }
       }
       
       if (mounted) {
@@ -803,6 +814,100 @@ $code
     if (mounted) {
       setState(() => _isLoading = false);
     }
+  }
+
+  /// 从AI响应中自动提取并保存代码
+  Future<List<String>> _autoSaveCodeFromResponse(String response, String userPrompt) async {
+    final createdFiles = <String>[];
+    
+    // 匹配代码块：```language\n代码\n```
+    final codeBlockPattern = RegExp(r'```(\w*)\n([\s\S]*?)```', multiLine: true);
+    final matches = codeBlockPattern.allMatches(response);
+    
+    if (matches.isEmpty) return createdFiles;
+    
+    // 获取保存目录
+    String? saveDir = await FilePicker.platform.getDirectoryPath();
+    if (saveDir == null) return createdFiles;
+    
+    // 从用户提示中推断项目/文件名
+    String baseName = 'generated';
+    if (userPrompt.contains('创建') || userPrompt.contains('生成')) {
+      // 尝试提取项目名
+      final nameMatch = RegExp(r'(?:创建|生成|写一个|帮我)[\s]*([a-zA-Z_\u4e00-\u9fa5]+)').firstMatch(userPrompt);
+      if (nameMatch != null) {
+        baseName = nameMatch.group(1)!.replaceAll(RegExp(r'[^\w]'), '_');
+      }
+    }
+    
+    int fileIndex = 1;
+    for (final match in matches) {
+      final language = match.group(1)?.trim() ?? 'txt';
+      final code = match.group(2)?.trim() ?? '';
+      
+      if (code.isEmpty) continue;
+      
+      // 根据语言确定文件扩展名
+      final extension = _getExtensionFromLanguage(language);
+      
+      // 尝试从代码中提取文件名
+      String fileName = '$baseName$fileIndex$extension';
+      
+      // 检查代码中是否有文件名注释
+      final fileNameMatch = RegExp(r'(?:文件名|filename|file)[:\s]*([a-zA-Z0-9_\-\.]+)').firstMatch(code);
+      if (fileNameMatch != null) {
+        fileName = fileNameMatch.group(1)!;
+      }
+      
+      // 保存文件
+      final filePath = p.join(saveDir, fileName);
+      final file = File(filePath);
+      
+      try {
+        await file.writeAsString(code);
+        createdFiles.add(filePath);
+        fileIndex++;
+      } catch (e) {
+        // 保存失败，继续下一个
+      }
+    }
+    
+    return createdFiles;
+  }
+  
+  /// 根据语言获取文件扩展名
+  String _getExtensionFromLanguage(String language) {
+    const extensions = {
+      'dart': '.dart',
+      'python': '.py',
+      'java': '.java',
+      'javascript': '.js',
+      'js': '.js',
+      'typescript': '.ts',
+      'ts': '.ts',
+      'kotlin': '.kt',
+      'swift': '.swift',
+      'go': '.go',
+      'rust': '.rs',
+      'c': '.c',
+      'cpp': '.cpp',
+      'c++': '.cpp',
+      'csharp': '.cs',
+      'c#': '.cs',
+      'html': '.html',
+      'css': '.css',
+      'scss': '.scss',
+      'json': '.json',
+      'xml': '.xml',
+      'yaml': '.yaml',
+      'yml': '.yml',
+      'sql': '.sql',
+      'shell': '.sh',
+      'bash': '.sh',
+      'markdown': '.md',
+      'md': '.md',
+    };
+    return extensions[language.toLowerCase()] ?? '.txt';
   }
 
   void _scrollToBottom() {

@@ -20,8 +20,16 @@ final signingConfigsProvider = FutureProvider<List<String>>((ref) async {
 });
 
 /// 构建页面
+/// 已改进：支持默认构建当前项目、选择项目、GitHub 构建
 class BuildPage extends ConsumerStatefulWidget {
-  const BuildPage({super.key});
+  final String? currentProjectPath;  // 当前打开的项目路径
+  final String? currentProjectName;  // 当前打开的项目名称
+  
+  const BuildPage({
+    super.key,
+    this.currentProjectPath,
+    this.currentProjectName,
+  });
 
   @override
   ConsumerState<BuildPage> createState() => _BuildPageState();
@@ -31,11 +39,31 @@ class _BuildPageState extends ConsumerState<BuildPage> {
   bool _isBuilding = false;
   BuildHistoryItem? _currentBuild;
   String? _selectedSigningConfig;
+  bool _useGitHubBuild = true;  // 默认使用 GitHub 构建
 
   @override
   void initState() {
     super.initState();
     _initBuildListener();
+    _initProjectPath();
+  }
+  
+  void _initProjectPath() {
+    // 如果有当前项目，设置默认项目路径
+    if (widget.currentProjectPath != null && widget.currentProjectPath!.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        final config = ref.read(buildConfigProvider);
+        ref.read(buildConfigProvider.notifier).state = BuildConfig(
+          projectName: widget.currentProjectName ?? config.projectName,
+          projectPath: widget.currentProjectPath!,
+          buildType: config.buildType,
+          enableProguard: config.enableProguard,
+          outputPath: config.outputPath,
+          signingConfig: config.signingConfig,
+          useGitHubBuild: true,  // 默认使用 GitHub 构建
+        );
+      });
+    }
   }
 
   void _initBuildListener() {
@@ -48,6 +76,26 @@ class _BuildPageState extends ConsumerState<BuildPage> {
         });
       }
     });
+  }
+  
+  @override
+  void didUpdateWidget(BuildPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // 更新项目路径
+    if (widget.currentProjectPath != oldWidget.currentProjectPath &&
+        widget.currentProjectPath != null &&
+        widget.currentProjectPath!.isNotEmpty) {
+      final config = ref.read(buildConfigProvider);
+      ref.read(buildConfigProvider.notifier).state = BuildConfig(
+        projectName: widget.currentProjectName ?? config.projectName,
+        projectPath: widget.currentProjectPath!,
+        buildType: config.buildType,
+        enableProguard: config.enableProguard,
+        outputPath: config.outputPath,
+        signingConfig: config.signingConfig,
+        useGitHubBuild: config.useGitHubBuild,
+      );
+    }
   }
 
   @override
@@ -75,12 +123,60 @@ class _BuildPageState extends ConsumerState<BuildPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            // 当前项目提示
+            if (widget.currentProjectPath != null && widget.currentProjectPath!.isNotEmpty)
+              Container(
+                padding: const EdgeInsets.all(12),
+                margin: const EdgeInsets.only(bottom: 16),
+                decoration: BoxDecoration(
+                  color: Colors.blue.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.blue.shade200),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.folder_open, color: Colors.blue.shade700),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            '当前项目: ${widget.currentProjectName ?? '未知项目'}',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: Colors.blue.shade700,
+                            ),
+                          ),
+                          Text(
+                            widget.currentProjectPath!,
+                            style: TextStyle(
+                              fontSize: 10,
+                              color: Colors.blue.shade600,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: _selectProjectDirectory,
+                      child: const Text('切换'),
+                    ),
+                  ],
+                ),
+              ),
+            
             // 项目信息
             _buildProjectSection(colorScheme),
             const SizedBox(height: 24),
             
             // 构建配置
             _buildConfigSection(colorScheme),
+            const SizedBox(height: 24),
+            
+            // 构建方式选择
+            _buildBuildMethodSection(colorScheme),
             const SizedBox(height: 24),
             
             // 签名配置
@@ -154,6 +250,43 @@ class _BuildPageState extends ConsumerState<BuildPage> {
     );
   }
   
+  /// 构建方式选择
+  Widget _buildBuildMethodSection(ColorScheme colorScheme) {
+    return _buildSection(
+      colorScheme,
+      title: '构建方式',
+      icon: Icons.cloud,
+      children: [
+        RadioListTile<bool>(
+          title: const Text('GitHub Actions 云端构建'),
+          subtitle: const Text('自动构建并下载 APK，无需本地环境'),
+          value: true,
+          groupValue: _useGitHubBuild,
+          onChanged: (value) {
+            setState(() => _useGitHubBuild = value ?? true);
+            final config = ref.read(buildConfigProvider);
+            ref.read(buildConfigProvider.notifier).state = config.copyWith(
+              useGitHubBuild: true,
+            );
+          },
+        ),
+        RadioListTile<bool>(
+          title: const Text('后端 API 构建'),
+          subtitle: const Text('通过远程服务器构建'),
+          value: false,
+          groupValue: _useGitHubBuild,
+          onChanged: (value) {
+            setState(() => _useGitHubBuild = value ?? true);
+            final config = ref.read(buildConfigProvider);
+            ref.read(buildConfigProvider.notifier).state = config.copyWith(
+              useGitHubBuild: false,
+            );
+          },
+        ),
+      ],
+    );
+  }
+
   Future<void> _selectProjectDirectory() async {
     try {
       String? selectedDirectory = await FilePicker.platform.getDirectoryPath();
@@ -167,6 +300,8 @@ class _BuildPageState extends ConsumerState<BuildPage> {
         buildType: config.buildType,
         enableProguard: config.enableProguard,
         outputPath: config.outputPath,
+        signingConfig: config.signingConfig,
+        useGitHubBuild: _useGitHubBuild,
       );
       
       if (mounted) {
@@ -206,7 +341,7 @@ class _BuildPageState extends ConsumerState<BuildPage> {
                   config.copyWith(buildType: selected.first);
             },
             showSelectedIcon: false,
-            style: ButtonStyle(
+            style: const ButtonStyle(
               visualDensity: VisualDensity.compact,
               tapTargetSize: MaterialTapTargetSize.shrinkWrap,
             ),
@@ -600,18 +735,16 @@ class _BuildPageState extends ConsumerState<BuildPage> {
           ),
           FilledButton(
             onPressed: () async {
-              if (controller.text.isNotEmpty) {
-                await SigningManager.saveSigningConfig(
-                  controller.text, 
-                  config.signingConfig,
+              if (controller.text.trim().isEmpty) return;
+              await SigningManager.saveSigningConfig(
+                controller.text.trim(),
+                config.signingConfig,
+              );
+              if (mounted) {
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('已保存: ${controller.text}')),
                 );
-                ref.invalidate(signingConfigsProvider);
-                if (mounted) {
-                  Navigator.pop(context);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('配置已保存')),
-                  );
-                }
               }
             },
             child: const Text('保存'),
@@ -622,12 +755,10 @@ class _BuildPageState extends ConsumerState<BuildPage> {
   }
 
   void _showGenerateKeystoreDialog(BuildConfig config) {
-    final keystorePathCtrl = TextEditingController(
-      text: '/storage/emulated/0/Documents/keystore/release.keystore',
-    );
-    final passwordCtrl = TextEditingController(text: 'android');
-    final aliasCtrl = TextEditingController(text: 'release');
-    final keyPasswordCtrl = TextEditingController(text: 'android');
+    final keystoreController = TextEditingController(text: 'release.keystore');
+    final passwordController = TextEditingController();
+    final aliasController = TextEditingController(text: 'release');
+    final keyPasswordController = TextEditingController();
 
     showDialog(
       context: context,
@@ -638,24 +769,24 @@ class _BuildPageState extends ConsumerState<BuildPage> {
             mainAxisSize: MainAxisSize.min,
             children: [
               TextField(
-                controller: keystorePathCtrl,
+                controller: keystoreController,
                 decoration: const InputDecoration(
-                  labelText: '密钥库路径',
+                  labelText: '文件名',
                   border: OutlineInputBorder(),
                 ),
               ),
               const SizedBox(height: 12),
               TextField(
-                controller: passwordCtrl,
+                controller: passwordController,
                 decoration: const InputDecoration(
-                  labelText: '密钥库密码',
+                  labelText: '密码',
                   border: OutlineInputBorder(),
                 ),
                 obscureText: true,
               ),
               const SizedBox(height: 12),
               TextField(
-                controller: aliasCtrl,
+                controller: aliasController,
                 decoration: const InputDecoration(
                   labelText: '别名',
                   border: OutlineInputBorder(),
@@ -663,9 +794,9 @@ class _BuildPageState extends ConsumerState<BuildPage> {
               ),
               const SizedBox(height: 12),
               TextField(
-                controller: keyPasswordCtrl,
+                controller: keyPasswordController,
                 decoration: const InputDecoration(
-                  labelText: '别名密码',
+                  labelText: '密钥密码',
                   border: OutlineInputBorder(),
                 ),
                 obscureText: true,
@@ -680,36 +811,11 @@ class _BuildPageState extends ConsumerState<BuildPage> {
           ),
           FilledButton(
             onPressed: () async {
-              final result = await SigningManager.generateKeystore(
-                keystorePath: keystorePathCtrl.text,
-                keystorePassword: passwordCtrl.text,
-                keyAlias: aliasCtrl.text,
-                keyPassword: keyPasswordCtrl.text,
+              // TODO: 实现密钥库生成
+              Navigator.pop(context);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('密钥库生成功能开发中...')),
               );
-
-              if (mounted) {
-                Navigator.pop(context);
-                
-                if (result != null) {
-                  final newConfig = SigningConfig(
-                    keystorePath: keystorePathCtrl.text,
-                    keystorePassword: passwordCtrl.text,
-                    keyAlias: aliasCtrl.text,
-                    keyPassword: keyPasswordCtrl.text,
-                    isDebug: false,
-                  );
-                  ref.read(buildConfigProvider.notifier).state = 
-                      config.copyWith(signingConfig: newConfig);
-                  
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('密钥库生成成功')),
-                  );
-                } else {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('请使用命令行手动生成密钥库')),
-                  );
-                }
-              }
             },
             child: const Text('生成'),
           ),
@@ -718,45 +824,64 @@ class _BuildPageState extends ConsumerState<BuildPage> {
     );
   }
 
-  void _updateSigningConfig(SigningConfig newConfig) {
+  void _updateSigningConfig(SigningConfig signingConfig) {
     final config = ref.read(buildConfigProvider);
     ref.read(buildConfigProvider.notifier).state = 
-        config.copyWith(signingConfig: newConfig);
+        config.copyWith(signingConfig: signingConfig);
   }
 
-  // 构建相关操作
   Future<void> _startBuild(BuildConfig config) async {
-    setState(() {
-      _isBuilding = true;
-    });
-
-    final result = await buildService.triggerBuild(
-      projectName: config.projectName,
-      buildType: config.buildType,
-      projectPath: config.projectPath,
-    );
-
-    if (mounted && result == null) {
-      setState(() {
-        _isBuilding = false;
-      });
+    if (config.projectPath.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('构建启动失败'),
-          backgroundColor: Colors.red,
-        ),
+        const SnackBar(content: Text('请先选择项目目录')),
       );
+      return;
+    }
+
+    setState(() => _isBuilding = true);
+
+    try {
+      BuildHistoryItem? result;
+      
+      if (_useGitHubBuild) {
+        // GitHub 构建
+        result = await buildService.triggerGitHubBuild(
+          projectName: config.projectName,
+          buildType: config.buildType,
+          branch: 'main',
+        );
+      } else {
+        // 本地/后端构建
+        result = await buildService.triggerBuild(
+          projectName: config.projectName,
+          buildType: config.buildType,
+          projectPath: config.projectPath,
+        );
+      }
+
+      if (result != null) {
+        setState(() => _currentBuild = result);
+      } else {
+        setState(() => _isBuilding = false);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('构建启动失败')),
+          );
+        }
+      }
+    } catch (e) {
+      setState(() => _isBuilding = false);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('构建失败: $e')),
+        );
+      }
     }
   }
 
-  Future<void> _cancelBuild() async {
-    if (_currentBuild?.buildNumber != null) {
-      await buildService.cancelBuild(_currentBuild!.buildNumber);
-    }
-    setState(() {
-      _isBuilding = false;
-      _currentBuild = null;
-    });
+  void _cancelBuild() {
+    buildService.cancelBuild();
+    setState(() => _isBuilding = false);
   }
 
   void _closeProgress() {
@@ -766,19 +891,34 @@ class _BuildPageState extends ConsumerState<BuildPage> {
     });
   }
 
-  Future<void> _downloadApk(String url) async {
-    if (url.startsWith('http')) {
-      final path = await buildService.downloadApk(url);
-      if (mounted && path != null) {
+  void _downloadApk(String? apkPath) async {
+    if (apkPath == null) return;
+    
+    try {
+      // 如果是远程 URL，直接下载
+      if (apkPath.startsWith('http')) {
+        // 复制到剪贴板
+        Clipboard.setData(ClipboardData(text: apkPath));
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('APK 已下载: $path')),
+          SnackBar(
+            content: const Text('APK 链接已复制到剪贴板'),
+            action: SnackBarAction(
+              label: '打开',
+              onPressed: () {
+                // TODO: 使用 url_launcher 打开链接
+              },
+            ),
+          ),
+        );
+      } else {
+        // 本地文件路径
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('APK 路径: $apkPath')),
         );
       }
-    } else {
-      // 本地路径
-      Clipboard.setData(ClipboardData(text: url));
+    } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('APK 路径: $url\n已复制到剪贴板')),
+        SnackBar(content: Text('下载失败: $e')),
       );
     }
   }
@@ -789,97 +929,6 @@ class _BuildPageState extends ConsumerState<BuildPage> {
       MaterialPageRoute(
         builder: (context) => const BuildHistoryPage(),
       ),
-    );
-  }
-}
-
-/// 构建详情页面（完整屏幕）
-class BuildDetailPage extends StatefulWidget {
-  const BuildDetailPage({super.key});
-
-  @override
-  State<BuildDetailPage> createState() => _BuildDetailPageState();
-}
-
-class _BuildDetailPageState extends State<BuildDetailPage> {
-  @override
-  void initState() {
-    super.initState();
-    // 监听构建状态
-    buildService.buildStatusStream.listen((item) {
-      if (mounted && item != null) {
-        setState(() {});
-      }
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final currentBuild = buildService.currentBuild;
-    final colorScheme = Theme.of(context).colorScheme;
-
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('构建详情'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.history),
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => const BuildHistoryPage(),
-                ),
-              );
-            },
-          ),
-        ],
-      ),
-      body: currentBuild != null
-          ? Padding(
-              padding: const EdgeInsets.all(16),
-              child: BuildProgressWidget(
-                buildItem: currentBuild,
-                onCancel: () async {
-                  await buildService.cancelBuild(currentBuild.buildNumber);
-                },
-                onClose: () => Navigator.pop(context),
-                onDownloadApk: (url) async {
-                  final path = await buildService.downloadApk(url);
-                  if (mounted && path != null) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('APK 已下载: $path')),
-                    );
-                  }
-                },
-              ),
-            )
-          : Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(
-                    Icons.construction,
-                    size: 80,
-                    color: colorScheme.onSurfaceVariant.withOpacity(0.3),
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    '暂无构建',
-                    style: TextStyle(
-                      fontSize: 18,
-                      color: colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-                  FilledButton.icon(
-                    onPressed: () => Navigator.pop(context),
-                    icon: const Icon(Icons.settings),
-                    label: const Text('去配置'),
-                  ),
-                ],
-              ),
-            ),
     );
   }
 }

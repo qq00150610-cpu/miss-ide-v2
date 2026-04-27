@@ -4,7 +4,7 @@
 enum BuildType {
   debug('debug', '调试构建'),
   release('release', '发布构建');
-
+	
   final String value;
   final String label;
   const BuildType(this.value, this.label);
@@ -93,7 +93,8 @@ class BuildConfig {
   final SigningConfig signingConfig;
   final String outputPath;
   final bool enableProguard;
-
+  final bool useGitHubBuild;  // 新增：是否使用 GitHub 构建
+	
   const BuildConfig({
     required this.projectName,
     required this.projectPath,
@@ -101,6 +102,7 @@ class BuildConfig {
     this.signingConfig = const SigningConfig(),
     this.outputPath = '/storage/emulated/0/Download',
     this.enableProguard = false,
+    this.useGitHubBuild = true,  // 默认使用 GitHub 构建
   });
 
   BuildConfig copyWith({
@@ -110,6 +112,7 @@ class BuildConfig {
     SigningConfig? signingConfig,
     String? outputPath,
     bool? enableProguard,
+    bool? useGitHubBuild,
   }) {
     return BuildConfig(
       projectName: projectName ?? this.projectName,
@@ -118,6 +121,7 @@ class BuildConfig {
       signingConfig: signingConfig ?? this.signingConfig,
       outputPath: outputPath ?? this.outputPath,
       enableProguard: enableProguard ?? this.enableProguard,
+      useGitHubBuild: useGitHubBuild ?? this.useGitHubBuild,
     );
   }
 
@@ -128,6 +132,7 @@ class BuildConfig {
     'signingConfig': signingConfig.toJson(),
     'outputPath': outputPath,
     'enableProguard': enableProguard,
+    'useGitHubBuild': useGitHubBuild,
   };
 
   factory BuildConfig.fromJson(Map<String, dynamic> json) {
@@ -141,6 +146,7 @@ class BuildConfig {
       signingConfig: SigningConfig.fromJson(json['signingConfig'] ?? {}),
       outputPath: json['outputPath'] ?? '/storage/emulated/0/Download',
       enableProguard: json['enableProguard'] ?? false,
+      useGitHubBuild: json['useGitHubBuild'] ?? true,
     );
   }
 }

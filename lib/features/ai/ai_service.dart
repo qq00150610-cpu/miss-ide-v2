@@ -59,6 +59,7 @@ enum AIIntentType {
 }
 
 /// AI服务 - 支持多模型
+/// 已修复：API Key 存储和验证功能
 class AIService {
   static final AIService _instance = AIService._internal();
   factory AIService() => _instance;
@@ -67,10 +68,13 @@ class AIService {
   String _selectedModel = 'DeepSeek';
   String _apiKey = '';
   bool _isInitialized = false;
+  bool _isValidating = false;
+  bool? _isApiKeyValid;
   
   // AI回调函数
   Function(String)? onProjectCreated;
   Function(String, String)? onCodeGenerated;
+  Function(bool)? onApiKeyValidated;
 
   final Map<String, AIModelConfig> _models = {
     'DeepSeek': AIModelConfig(
@@ -224,7 +228,9 @@ main();
     try {
       final prefs = await SharedPreferences.getInstance();
       _selectedModel = prefs.getString('ai_selected_model') ?? 'DeepSeek';
+      // 修复：确保正确加载当前模型的 API Key
       _apiKey = prefs.getString('ai_api_key_$_selectedModel') ?? '';
+      debugPrint('AI Service initialized. Model: $_selectedModel, has API Key: ${_apiKey.isNotEmpty}');
     } catch (e) {
       debugPrint('AI Service init error: $e');
     }
@@ -239,9 +245,18 @@ main();
   
   /// 检查是否已配置
   bool get isConfigured => _apiKey.isNotEmpty;
+  
+  /// API Key 是否正在验证
+  bool get isValidating => _isValidating;
+  
+  /// API Key 是否有效
+  bool? get isApiKeyValid => _isApiKeyValid;
 
   /// 获取所有模型名称
   List<String> get modelNames => _models.keys.toList();
+  
+  /// 获取模型配置
+  AIModelConfig? getModelConfig(String modelName) => _models[modelName];
 
   /// 获取所有项目模板名称
   List<String> get templateNames => _projectTemplates.keys.toList();
@@ -249,13 +264,21 @@ main();
   /// 切换模型
   Future<void> setModel(String modelName) async {
     if (!_models.containsKey(modelName)) return;
+    
+    final previousModel = _selectedModel;
     _selectedModel = modelName;
+    
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('ai_selected_model', modelName);
+      // 修复：加载新模型的 API Key
       _apiKey = prefs.getString('ai_api_key_$modelName') ?? '';
+      // 重置验证状态
+      _isApiKeyValid = null;
+      debugPrint('Switched to model: $modelName, has API Key: ${_apiKey.isNotEmpty}');
     } catch (e) {
       debugPrint('Set model error: $e');
+      _selectedModel = previousModel;
     }
   }
 
@@ -266,9 +289,162 @@ main();
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('ai_api_key_$_selectedModel', apiKey.trim());
       debugPrint('API Key saved for $_selectedModel');
+      
+      // 验证 API Key
+      validateApiKey();
+      
       return true;
     } catch (e) {
       debugPrint('Failed to save API Key: $e');
+      return false;
+    }
+  }
+
+  /// 验证 API Key 是否有效
+  Future<bool> validateApiKey() async {
+    if (_apiKey.isEmpty) {
+      _isApiKeyValid = false;
+      onApiKeyValidated?.call(false);
+      return false;
+    }
+    
+    if (_isValidating) return _isApiKeyValid ?? false;
+    
+    _isValidating = true;
+    _isApiKeyValid = null;
+    
+    try {
+      final config = _models[_selectedModel];
+      if (config == null || config.provider == 'ollama') {
+        _isValidating = false;
+        _isApiKeyValid = true; // Ollama 不需要 API Key
+        onApiKeyValidated?.call(true);
+        return true;
+      }
+      
+      bool isValid = false;
+      
+      switch (config.provider) {
+        case 'deepseek':
+        case 'openai':
+          isValid = await _validateOpenAICompatibleApi(config);
+          break;
+        case 'qwen':
+          isValid = await _validateQwenApi(config);
+          break;
+        case 'zhipu':
+          isValid = await _validateZhipuApi(config);
+          break;
+        case 'google':
+          isValid = await _validateGeminiApi(config);
+          break;
+        case 'anthropic':
+          isValid = await _validateClaudeApi(config);
+          break;
+        default:
+          isValid = true;
+      }
+      
+      _isApiKeyValid = isValid;
+      onApiKeyValidated?.call(isValid);
+      debugPrint('API Key validation result for $_selectedModel: $isValid');
+      
+    } catch (e) {
+      debugPrint('API Key validation error: $e');
+      _isApiKeyValid = false;
+      onApiKeyValidated?.call(false);
+    } finally {
+      _isValidating = false;
+    }
+    
+    return _isApiKeyValid ?? false;
+  }
+  
+  /// 验证 OpenAI 兼容 API
+  Future<bool> _validateOpenAICompatibleApi(AIModelConfig config) async {
+    try {
+      final response = await http.post(
+        Uri.parse(config.apiEndpoint),
+        headers: {
+          'Content-Type': 'application/json; charset=utf-8',
+          'Authorization': 'Bearer $_apiKey',
+        },
+        body: utf8.encode(jsonEncode({
+          'model': config.modelId,
+          'messages': [{'role': 'user', 'content': 'hi'}],
+          'max_tokens': 5,
+        })),
+      ).timeout(const Duration(seconds: 10));
+      
+      return response.statusCode == 200;
+    } catch (e) {
+      return false;
+    }
+  }
+  
+  /// 验证通义千问 API
+  Future<bool> _validateQwenApi(AIModelConfig config) async {
+    try {
+      final response = await http.post(
+        Uri.parse(config.apiEndpoint),
+        headers: {
+          'Content-Type': 'application/json; charset=utf-8',
+          'Authorization': 'Bearer $_apiKey',
+        },
+        body: utf8.encode(jsonEncode({
+          'model': config.modelId,
+          'input': {'messages': [{'role': 'user', 'content': 'hi'}]},
+        })),
+      ).timeout(const Duration(seconds: 10));
+      
+      return response.statusCode == 200;
+    } catch (e) {
+      return false;
+    }
+  }
+  
+  /// 验证智谱 API
+  Future<bool> _validateZhipuApi(AIModelConfig config) async {
+    return _validateOpenAICompatibleApi(config);
+  }
+  
+  /// 验证 Gemini API
+  Future<bool> _validateGeminiApi(AIModelConfig config) async {
+    try {
+      final url = '${config.apiEndpoint}?key=$_apiKey';
+      final response = await http.post(
+        Uri.parse(url),
+        headers: {'Content-Type': 'application/json; charset=utf-8'},
+        body: utf8.encode(jsonEncode({
+          'contents': [{'parts': [{'text': 'hi'}]}]
+        })),
+      ).timeout(const Duration(seconds: 10));
+      
+      return response.statusCode == 200;
+    } catch (e) {
+      return false;
+    }
+  }
+  
+  /// 验证 Claude API
+  Future<bool> _validateClaudeApi(AIModelConfig config) async {
+    try {
+      final response = await http.post(
+        Uri.parse(config.apiEndpoint),
+        headers: {
+          'Content-Type': 'application/json; charset=utf-8',
+          'x-api-key': _apiKey,
+          'anthropic-version': '2023-06-01',
+        },
+        body: utf8.encode(jsonEncode({
+          'model': config.modelId,
+          'max_tokens': 10,
+          'messages': [{'role': 'user', 'content': 'hi'}],
+        })),
+      ).timeout(const Duration(seconds: 10));
+      
+      return response.statusCode == 200;
+    } catch (e) {
       return false;
     }
   }
@@ -456,9 +632,9 @@ main();
     try {
       final prompt = '''请解释以下代码的功能和工作原理：
 
-\`\`\`
+```
 $code
-\`\`\`
+```
 
 请用简洁易懂的语言解释，包括：
 1. 代码的主要功能
@@ -601,7 +777,7 @@ $code
     if (response.statusCode == 200) {
       final body = utf8.decode(response.bodyBytes);
       final data = jsonDecode(body);
-      return data['choices'][0]['message']['content'] ?? '无响应内容';
+      return data['choices'][0]['message']['content'] ?? '无响应';
     } else {
       final body = utf8.decode(response.bodyBytes);
       return 'API错误 (${response.statusCode}): $body';

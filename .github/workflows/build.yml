@@ -4,6 +4,15 @@ on:
   push:
     branches: [ main, master ]
   workflow_dispatch:
+    inputs:
+      build_type:
+        description: 'Build Type'
+        required: true
+        default: 'release'
+        type: choice
+        options:
+          - debug
+          - release
 
 jobs:
   build-android:
@@ -27,11 +36,44 @@ jobs:
       - name: Get dependencies
         run: flutter pub get
       
+      - name: Determine Build Type
+        id: build_type
+        run: |
+          if [ "${{ inputs.build_type }}" != "" ]; then
+            echo "type=${{ inputs.build_type }}" >> $GITHUB_OUTPUT
+          else
+            echo "type=release" >> $GITHUB_OUTPUT
+          fi
+      
       - name: Build APK
-        run: flutter build apk --release --no-tree-shake-icons || flutter build apk --release
+        run: |
+          if [ "${{ steps.build_type.outputs.type }}" == "debug" ]; then
+            flutter build apk --debug --no-tree-shake-icons || flutter build apk --debug
+          else
+            flutter build apk --release --no-tree-shake-icons || flutter build apk --release
+          fi
+      
+      - name: List Build Outputs
+        run: ls -la build/app/outputs/flutter-apk/
       
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: miss-ide-v2-apk
-          path: build/app/outputs/flutter-apk/app-release.apk
+          name: miss-ide-v2-apk-${{ steps.build_type.outputs.type }}
+          path: build/app/outputs/flutter-apk/app-${{ steps.build_type.outputs.type }}.apk
+          retention-days: 7
+      
+      - name: Create Download URL
+        run: |
+          echo "artifact_url=https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" >> $GITHUB_OUTPUT
+          echo "artifact_name=miss-ide-v2-${{ steps.build_type.outputs.type }}.apk" >> $GITHUB_OUTPUT
+      
+      - name: Display Download Info
+        run: |
+          echo "=========================================="
+          echo "构建完成！"
+          echo "APK 文件: app-${{ steps.build_type.outputs.type }}.apk"
+          echo "构建类型: ${{ steps.build_type.outputs.type }}"
+          echo "=========================================="
+          echo "您可以在 Artifacts 中下载 APK 文件"
+          echo "或者点击上方 'Summary' 查看构建产物"

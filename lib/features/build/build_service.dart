@@ -29,6 +29,11 @@ class BuildService {
   static Future<void> setGitHubToken(String token) async {
     await _storage.write(key: _githubTokenKey, value: token);
   }
+  
+  /// 获取 GitHub Token（同步）
+  static Future<String> getGitHubToken() async {
+    return await _storage.read(key: _githubTokenKey) ?? '';
+  }
 
   /// 获取带认证的请求头
   Future<Map<String, String>> _getHeaders() async {
@@ -121,7 +126,243 @@ class BuildService {
     buildNumber: json['buildNumber'],
   );
 
-  /// 触发构建
+  /// 触发 GitHub 构建（新增方法）
+  Future<BuildHistoryItem?> triggerGitHubBuild({
+    required String projectName,
+    BuildType buildType = BuildType.debug,
+    String branch = 'main',
+  }) async {
+    _log('开始 GitHub Actions 构建...');
+    _log('项目: $projectName');
+    _log('类型: ${buildType.label}');
+    _log('分支: $branch');
+
+    final buildId = 'github_build_${DateTime.now().millisecondsSinceEpoch}';
+    final startTime = DateTime.now();
+
+    // 创建构建记录
+    var buildItem = BuildHistoryItem(
+      id: buildId,
+      projectName: projectName,
+      buildType: buildType,
+      status: BuildStatus.pending,
+      startTime: startTime,
+    );
+
+    _currentBuild = buildItem;
+    _buildStatusController.add(buildItem);
+
+    try {
+      // 获取 GitHub Token
+      final token = await _githubToken;
+      if (token.isEmpty) {
+        throw Exception('未配置 GitHub Token，请在设置中配置');
+      }
+
+      // 先检查 workflow 是否存在
+      _log('正在连接 GitHub...');
+      final workflowsResponse = await http.get(
+        Uri.parse('https://api.github.com/repos/$_githubRepo/actions/workflows'),
+        headers: {
+          'Authorization': 'token $token',
+          'Accept': 'application/vnd.github.v3+json',
+        },
+      );
+
+      if (workflowsResponse.statusCode != 200) {
+        throw Exception('无法访问 GitHub 仓库，Token 可能无效或权限不足');
+      }
+
+      final workflows = jsonDecode(workflowsResponse.body)['workflows'] as List;
+      
+      if (workflows.isEmpty) {
+        throw Exception('未找到构建工作流');
+      }
+
+      // 使用第一个 workflow
+      final workflow = workflows.first;
+      _log('找到 Workflow: ${workflow['name']}');
+
+      // 触发 workflow
+      _log('正在触发构建...');
+      final triggerResponse = await http.post(
+        Uri.parse('https://api.github.com/repos/$_githubRepo/actions/workflows/${workflow['id']}/runs'),
+        headers: {
+          'Authorization': 'token $token',
+          'Accept': 'application/vnd.github.v3+json',
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode({
+          'ref': branch,
+          'inputs': {
+            'build_type': buildType.value,
+          },
+        }),
+      );
+
+      if (triggerResponse.statusCode == 201) {
+        final runData = jsonDecode(triggerResponse.body);
+        final runId = runData['id'];
+        
+        buildItem = buildItem.copyWith(
+          buildNumber: runId,
+          status: BuildStatus.running,
+        );
+        _currentBuild = buildItem;
+        _buildStatusController.add(buildItem);
+        _log('构建已触发，Run ID: $runId');
+
+        // 开始轮询构建状态
+        await _pollGitHubBuildStatus(runId, buildItem, token);
+        
+        return buildItem;
+      } else {
+        final errorBody = utf8.decode(triggerResponse.bodyBytes);
+        throw Exception('触发构建失败 (${triggerResponse.statusCode}): $errorBody');
+      }
+    } catch (e) {
+      debugPrint('GitHub build trigger error: $e');
+      _log('构建触发失败: $e');
+      
+      buildItem = buildItem.copyWith(
+        status: BuildStatus.failure,
+        endTime: DateTime.now(),
+        errorMessage: e.toString(),
+      );
+      _currentBuild = buildItem;
+      _buildStatusController.add(buildItem);
+      _addToHistory(buildItem);
+      
+      return buildItem;
+    }
+  }
+
+  /// 轮询 GitHub Actions 构建状态
+  Future<void> _pollGitHubBuildStatus(int runId, BuildHistoryItem buildItem, String token) async {
+    const maxAttempts = 120; // 最多等待 60 分钟
+    var attempts = 0;
+    
+    while (attempts < maxAttempts) {
+      try {
+        await Future.delayed(const Duration(seconds: 30));
+        
+        final response = await http.get(
+          Uri.parse('https://api.github.com/repos/$_githubRepo/actions/runs/$runId'),
+          headers: {
+            'Authorization': 'token $token',
+            'Accept': 'application/vnd.github.v3+json',
+          },
+        );
+
+        if (response.statusCode == 200) {
+          final data = jsonDecode(response.body);
+          final status = data['status'] as String;
+          final conclusion = data['conclusion'] as String?;
+          
+          _log('构建状态: $status${conclusion != null ? ', 结论: $conclusion' : ''}');
+
+          BuildStatus newStatus;
+          String? apkPath;
+          String? errorMsg;
+
+          switch (conclusion) {
+            case 'success':
+              newStatus = BuildStatus.success;
+              // 获取构建产物（APK 下载链接）
+              apkPath = await _getGitHubArtifactUrl(runId, token);
+              if (apkPath != null) {
+                _log('APK 下载链接: $apkPath');
+              }
+              _log('构建成功!');
+              break;
+            case 'failure':
+              newStatus = BuildStatus.failure;
+              errorMsg = 'GitHub Actions 构建失败';
+              _log('构建失败');
+              break;
+            case 'cancelled':
+              newStatus = BuildStatus.cancelled;
+              _log('构建已取消');
+              break;
+            default:
+              newStatus = status == 'completed' 
+                  ? BuildStatus.failure 
+                  : BuildStatus.running;
+          }
+
+          if (newStatus != BuildStatus.running) {
+            final updatedItem = buildItem.copyWith(
+              status: newStatus,
+              endTime: DateTime.now(),
+              apkPath: apkPath,
+              errorMessage: errorMsg,
+            );
+            _currentBuild = updatedItem;
+            _buildStatusController.add(updatedItem);
+            _addToHistory(updatedItem);
+            return;
+          }
+
+          attempts++;
+        } else {
+          _log('获取状态失败: ${response.statusCode}');
+          attempts++;
+        }
+      } catch (e) {
+        debugPrint('Poll error: $e');
+        _log('轮询错误: $e');
+        attempts++;
+      }
+    }
+
+    // 超时
+    final updatedItem = buildItem.copyWith(
+      status: BuildStatus.failure,
+      endTime: DateTime.now(),
+      errorMessage: '构建超时',
+    );
+    _currentBuild = updatedItem;
+    _buildStatusController.add(updatedItem);
+    _addToHistory(updatedItem);
+  }
+
+  /// 获取 GitHub 构建产物的下载链接
+  Future<String?> _getGitHubArtifactUrl(int runId, String token) async {
+    try {
+      // 获取 artifacts 列表
+      final response = await http.get(
+        Uri.parse('https://api.github.com/repos/$_githubRepo/actions/runs/$runId/artifacts'),
+        headers: {
+          'Authorization': 'token $token',
+          'Accept': 'application/vnd.github.v3+json',
+        },
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final artifacts = data['artifacts'] as List;
+        
+        // 查找 APK 文件
+        for (final artifact in artifacts) {
+          final name = artifact['name'] as String;
+          if (name.contains('apk') || name.contains('app-release')) {
+            // 返回下载 URL
+            return artifact['archive_download_url'] as String;
+          }
+        }
+        
+        // 如果没找到特定名称，返回第一个 artifact
+        if (artifacts.isNotEmpty) {
+          return artifacts.first['archive_download_url'] as String;
+        }
+      }
+    } catch (e) {
+      debugPrint('Failed to get artifact URL: $e');
+    }
+    return null;
+  }
+
+  /// 触发构建（原有方法，保持兼容）
   Future<BuildHistoryItem?> triggerBuild({
     required String projectName,
     BuildType buildType = BuildType.debug,
@@ -468,7 +709,7 @@ class BuildService {
     }
   }
 
-  /// 轮询 GitHub Actions 构建状态
+  /// 轮询 GitHub Actions 构建状态（原有方法，保持兼容）
   Future<void> _pollBuildStatus(int runId, BuildHistoryItem buildItem) async {
     const maxAttempts = 60; // 最多等待 30 分钟
     var attempts = 0;
@@ -551,6 +792,28 @@ class BuildService {
     _addToHistory(updatedItem);
   }
 
+  /// 获取构建产物
+  Future<String?> _getBuildArtifact(int runId) async {
+    try {
+      final response = await http.get(
+        Uri.parse('https://api.github.com/repos/$_githubRepo/actions/runs/$runId/artifacts'),
+        headers: await _getHeaders(),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final artifacts = data['artifacts'] as List;
+        
+        if (artifacts.isNotEmpty) {
+          return artifacts.first['archive_download_url'];
+        }
+      }
+    } catch (e) {
+      debugPrint('Failed to get artifact: $e');
+    }
+    return null;
+  }
+
   /// 轮询后端构建状态
   Future<void> _pollBackendBuildStatus(String buildId, BuildHistoryItem buildItem) async {
     const maxAttempts = 120;
@@ -612,12 +875,11 @@ class BuildService {
 
           attempts++;
         } else {
-          _log('获取后端状态失败: ${response.statusCode}');
           attempts++;
         }
       } catch (e) {
         debugPrint('Backend poll error: $e');
-        _log('后端轮询错误: $e');
+        _log('轮询错误: $e');
         attempts++;
       }
     }
@@ -633,36 +895,8 @@ class BuildService {
     _addToHistory(updatedItem);
   }
 
-  /// 获取构建产物
-  Future<String?> _getBuildArtifact(int runId) async {
-    try {
-      final response = await http.get(
-        Uri.parse('https://api.github.com/repos/$_githubRepo/actions/runs/$runId/artifacts'),
-        headers: await _getHeaders(),
-      );
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        final artifacts = data['artifacts'] as List;
-        
-        if (artifacts.isNotEmpty) {
-          final apkArtifact = artifacts.firstWhere(
-            (a) => a['name']?.toString().contains('apk') ?? false,
-            orElse: () => artifacts.first,
-          );
-          
-          // 返回下载链接
-          return apkArtifact['archive_download_url'];
-        }
-      }
-    } catch (e) {
-      debugPrint('Get artifact error: $e');
-    }
-    return null;
-  }
-
   /// 下载 APK
-  Future<String?> downloadApk(String url, {String? savePath}) async {
+  Future<String?> downloadApk(String url) async {
     try {
       _log('开始下载 APK...');
       
@@ -673,20 +907,14 @@ class BuildService {
 
       if (response.statusCode == 200) {
         final docDir = await getApplicationDocumentsDirectory();
-        final downloadDir = Directory(p.join(docDir.path, 'downloads'));
+        final apkPath = p.join(docDir.path, 'downloads', 'miss-ide-${DateTime.now().millisecondsSinceEpoch}.apk');
         
-        if (!await downloadDir.exists()) {
-          await downloadDir.create(recursive: true);
-        }
-
-        final fileName = 'app_${DateTime.now().millisecondsSinceEpoch}.apk';
-        final filePath = savePath ?? p.join(downloadDir.path, fileName);
-        
-        final file = File(filePath);
+        final file = File(apkPath);
+        await file.parent.create(recursive: true);
         await file.writeAsBytes(response.bodyBytes);
         
-        _log('APK 已下载: $filePath');
-        return filePath;
+        _log('APK 已下载: $apkPath');
+        return apkPath;
       } else {
         _log('下载失败: ${response.statusCode}');
         return null;
@@ -699,100 +927,52 @@ class BuildService {
   }
 
   /// 取消构建
-  Future<bool> cancelBuild(int? runId) async {
-    if (runId == null) {
-      _currentBuild = null;
-      _buildStatusController.add(null);
-      return true;
+  Future<void> cancelBuild() async {
+    if (_currentBuild?.buildNumber != null) {
+      try {
+        final runId = _currentBuild!.buildNumber;
+        await http.post(
+          Uri.parse('https://api.github.com/repos/$_githubRepo/actions/runs/$runId/cancel'),
+          headers: await _getHeaders(),
+        );
+        _log('构建已取消');
+      } catch (e) {
+        debugPrint('Cancel error: $e');
+      }
     }
-
-    try {
-      final response = await http.post(
-        Uri.parse('https://api.github.com/repos/$_githubRepo/actions/runs/$runId/cancel'),
-        headers: await _getHeaders(),
-      );
-
-      return response.statusCode == 200;
-    } catch (e) {
-      debugPrint('Cancel build error: $e');
-      return false;
+    
+    final updatedItem = _currentBuild?.copyWith(
+      status: BuildStatus.cancelled,
+      endTime: DateTime.now(),
+    );
+    
+    if (updatedItem != null) {
+      _addToHistory(updatedItem);
     }
+    
+    _currentBuild = null;
+    _buildStatusController.add(null);
   }
 
-  /// 获取构建历史
-  List<BuildHistoryItem> getHistory() => List.unmodifiable(_buildHistory);
-
-  /// 清空历史
-  Future<void> clearHistory() async {
-    _buildHistory.clear();
-    await _saveHistory();
-    _historyController.add(_buildHistory);
-  }
-
-  /// 添加到历史
+  /// 添加到历史记录
   void _addToHistory(BuildHistoryItem item) {
     _buildHistory.insert(0, item);
-    
-    // 只保留最近 50 条
     if (_buildHistory.length > 50) {
       _buildHistory.removeRange(50, _buildHistory.length);
     }
-    
     _saveHistory();
     _historyController.add(_buildHistory);
   }
 
-  /// 获取当前构建状态
-  BuildHistoryItem? get currentBuild => _currentBuild;
-
-  /// 输出日志
+  /// 记录日志
   void _log(String message) {
     final timestamp = DateTime.now().toString().substring(11, 19);
-    final logMessage = '[$timestamp] $message';
-    _logController.add(logMessage);
-    debugPrint(logMessage);
+    _logController.add('[$timestamp] $message');
+    debugPrint(message);
   }
 
-  /// 检查 GitHub Actions 状态
-  Future<Map<String, dynamic>?> checkGitHubStatus() async {
-    try {
-      final response = await http.get(
-        Uri.parse('https://api.github.com/repos/$_githubRepo'),
-        headers: await _getHeaders(),
-      );
-
-      if (response.statusCode == 200) {
-        return jsonDecode(response.body);
-      }
-    } catch (e) {
-      debugPrint('Check GitHub status error: $e');
-    }
-    return null;
-  }
-
-  /// 获取可用的 Workflows
-  Future<List<Map<String, dynamic>>> getWorkflows() async {
-    try {
-      final response = await http.get(
-        Uri.parse('https://api.github.com/repos/$_githubRepo/actions/workflows'),
-        headers: await _getHeaders(),
-      );
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        return List<Map<String, dynamic>>.from(data['workflows'] ?? []);
-      }
-    } catch (e) {
-      debugPrint('Get workflows error: $e');
-    }
-    return [];
-  }
-
-  void dispose() {
-    _historyController.close();
-    _buildStatusController.close();
-    _logController.close();
-  }
+  /// 获取历史记录
+  List<BuildHistoryItem> getHistory() => List.from(_buildHistory);
 }
 
 // 全局实例

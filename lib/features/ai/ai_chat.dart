@@ -40,12 +40,17 @@ class _AIChatPageState extends State<AIChatPage> {
   String? _lastReadFile;
   String? _lastReadContent;
 
+  // 已保存的文件列表
+  final List<SavedFile> _savedFiles = [];
+
   @override
   void initState() {
     super.initState();
     _initService();
     // 设置AI回调
     aiService.onCodeGenerated = _onCodeGenerated;
+    // 设置 API Key 验证回调
+    aiService.onApiKeyValidated = _onApiKeyValidated;
     // 初始化文件操作服务
     if (widget.projectPath != null) {
       fileOperationService.setProjectPath(widget.projectPath);
@@ -81,6 +86,20 @@ class _AIChatPageState extends State<AIChatPage> {
     });
   }
 
+  void _onApiKeyValidated(bool isValid) {
+    if (mounted) {
+      setState(() {});
+      if (!isValid) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('${aiService.selectedModel} API Key 无效，请检查'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -93,7 +112,25 @@ class _AIChatPageState extends State<AIChatPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('AI 助手 - ${aiService.selectedModel}', style: const TextStyle(fontSize: 16)),
+                  Row(
+                    children: [
+                      Text('AI 助手 - ${aiService.selectedModel}', style: const TextStyle(fontSize: 16)),
+                      if (aiService.isValidating)
+                        const Padding(
+                          padding: EdgeInsets.only(left: 8),
+                          child: SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 2)),
+                        )
+                      else if (aiService.apiKey.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(left: 8),
+                          child: Icon(
+                            aiService.isApiKeyValid == true ? Icons.check_circle : Icons.error,
+                            size: 14,
+                            color: aiService.isApiKeyValid == true ? Colors.green : Colors.red,
+                          ),
+                        ),
+                    ],
+                  ),
                   if (widget.projectPath != null)
                     Text(
                       '项目: ${p.basename(widget.projectPath!)}',
@@ -125,7 +162,16 @@ class _AIChatPageState extends State<AIChatPage> {
                       const Icon(Icons.check, size: 16, color: Colors.green),
                     if (model == aiService.selectedModel)
                       const SizedBox(width: 8),
-                    Text(model),
+                    Expanded(child: Text(model)),
+                    FutureBuilder<bool>(
+                      future: _hasApiKey(model),
+                      builder: (context, snapshot) {
+                        if (snapshot.data == true) {
+                          return const Icon(Icons.key, size: 14, color: Colors.green);
+                        }
+                        return const SizedBox.shrink();
+                      },
+                    ),
                   ],
                 ),
               );
@@ -157,6 +203,28 @@ class _AIChatPageState extends State<AIChatPage> {
                   ),
                 ],
               ),
+            )
+          else if (aiService.apiKey.isNotEmpty && aiService.isApiKeyValid == false)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              color: Colors.red.shade100,
+              child: Row(
+                children: [
+                  const Icon(Icons.error, color: Colors.red),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      '${aiService.selectedModel} API Key 无效，点击重新验证',
+                      style: const TextStyle(fontSize: 12),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: () => _showApiKeyDialog(),
+                    child: const Text('重新配置'),
+                  ),
+                ],
+              ),
             ),
           
           // 文件操作上下文提示
@@ -182,6 +250,49 @@ class _AIChatPageState extends State<AIChatPage> {
                       padding: EdgeInsets.zero,
                       constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
                     ),
+                ],
+              ),
+            ),
+          
+          // 已保存的文件列表
+          if (_savedFiles.isNotEmpty)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              color: Colors.green.shade50,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(Icons.save, size: 16, color: Colors.green.shade700),
+                      const SizedBox(width: 8),
+                      Text(
+                        '已保存 ${_savedFiles.length} 个文件',
+                        style: TextStyle(fontSize: 12, color: Colors.green.shade700, fontWeight: FontWeight.bold),
+                      ),
+                      const Spacer(),
+                      TextButton(
+                        onPressed: () => _showSavedFilesDialog(),
+                        child: Text('查看', style: TextStyle(fontSize: 12)),
+                      ),
+                    ],
+                  ),
+                  Wrap(
+                    spacing: 4,
+                    runSpacing: 4,
+                    children: _savedFiles.take(3).map((file) {
+                      return Chip(
+                        label: Text(
+                          p.basename(file.path),
+                          style: const TextStyle(fontSize: 10),
+                        ),
+                        avatar: Icon(Icons.insert_drive_file, size: 14),
+                        padding: EdgeInsets.zero,
+                        visualDensity: VisualDensity.compact,
+                      );
+                    }).toList(),
+                  ),
                 ],
               ),
             ),
@@ -460,6 +571,88 @@ class _AIChatPageState extends State<AIChatPage> {
         ],
       ),
     );
+  }
+
+  /// 检查指定模型是否有 API Key
+  Future<bool> _hasApiKey(String model) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final key = prefs.getString('ai_api_key_$model');
+      return key != null && key.isNotEmpty;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  void _showSavedFilesDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            const Icon(Icons.folder, color: Colors.green),
+            const SizedBox(width: 8),
+            Text('已保存的文件 (${_savedFiles.length})'),
+          ],
+        ),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: ListView.builder(
+            shrinkWrap: true,
+            itemCount: _savedFiles.length,
+            itemBuilder: (context, index) {
+              final file = _savedFiles[index];
+              return ListTile(
+                leading: Icon(_getFileIcon(file.extension)),
+                title: Text(p.basename(file.path)),
+                subtitle: Text(file.path, style: const TextStyle(fontSize: 10)),
+                trailing: IconButton(
+                  icon: const Icon(Icons.open_in_new),
+                  onPressed: () {
+                    Navigator.pop(context);
+                    // 导航到文件
+                    widget.onNavigateToFileBrowser?.call(file.path, file.content);
+                  },
+                ),
+              );
+            },
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              setState(() => _savedFiles.clear());
+              Navigator.pop(context);
+            },
+            child: const Text('清除记录'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('关闭'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  IconData _getFileIcon(String extension) {
+    switch (extension.toLowerCase()) {
+      case 'dart':
+        return Icons.flutter_dash;
+      case 'py':
+        return Icons.code;
+      case 'js':
+      case 'ts':
+        return Icons.javascript;
+      case 'java':
+        return Icons.coffee;
+      case 'go':
+        return Icons.code;
+      case 'rs':
+        return Icons.settings;
+      default:
+        return Icons.insert_drive_file;
+    }
   }
 
   String _buildContextHint() {
@@ -809,28 +1002,48 @@ $code
     if (_pendingCode == null) return;
     
     try {
-      String? outputPath = await FilePicker.platform.saveFile(
-        dialogTitle: '保存代码文件',
-        fileName: 'generated_code.${_getExtension(_pendingLanguage ?? 'txt')}',
-      );
+      // 确定保存目录
+      String saveDir = widget.projectPath ?? '';
+      if (saveDir.isEmpty) {
+        saveDir = await FilePicker.platform.getDirectoryPath() ?? '';
+        if (saveDir.isEmpty) return;
+      }
       
-      if (outputPath != null) {
-        final file = File(outputPath);
-        await file.writeAsString(_pendingCode!);
-        
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('已保存到: ${outputPath.split('/').last}'),
-              action: SnackBarAction(
-                label: '打开',
-                onPressed: () {
-                  // 可以导航到编辑器
-                },
-              ),
+      // 生成文件名
+      final extension = _getExtension(_pendingLanguage ?? 'txt');
+      final timestamp = DateTime.now().millisecondsSinceEpoch;
+      String fileName = 'generated_code_$timestamp.$extension';
+      
+      // 尝试从代码中提取更好的文件名
+      final fileNameMatch = RegExp(r'(?:文件名|filename|file\s* name)[:\s]*([a-zA-Z0-9_\-\.]+)', caseSensitive: false).firstMatch(_pendingCode!);
+      if (fileNameMatch != null) {
+        fileName = fileNameMatch.group(1)!;
+      }
+      
+      final filePath = p.join(saveDir, fileName);
+      final file = File(filePath);
+      await file.parent.create(recursive: true);
+      await file.writeAsString(_pendingCode!);
+      
+      // 添加到已保存文件列表
+      _savedFiles.add(SavedFile(
+        path: filePath,
+        content: _pendingCode!,
+        extension: extension,
+        savedAt: DateTime.now(),
+      ));
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('已保存到: $fileName'),
+            action: SnackBarAction(
+              label: '查看',
+              onPressed: _showSavedFilesDialog,
             ),
-          );
-        }
+          ),
+        );
+        setState(() {});
       }
     } catch (e) {
       if (mounted) {
@@ -1053,8 +1266,16 @@ $context
         final writeResult = await fileOperationService.writeFile(filePath, code);
         
         if (writeResult.success) {
+          // 添加到已保存文件列表
+          _savedFiles.add(SavedFile(
+            path: p.join(widget.projectPath!, filePath),
+            content: code,
+            extension: p.extension(filePath).replaceFirst('.', ''),
+            savedAt: DateTime.now(),
+          ));
+          
           _addMessage(ChatMessage(
-            text: '✅ 文件已创建: $filePath\n\n\`\`\`$language\n${code.length > 500 ? '${code.substring(0, 500)}...\n(内容过长，已截断显示)' : code}\n\`\`\`\n\n文件已保存到项目目录。',
+            text: '✅ 文件已创建: $filePath\n\n```$language\n${code.length > 500 ? '${code.substring(0, 500)}...\n(内容过长，已截断显示)' : code}\n```\n\n文件已保存到项目目录。',
             isUser: false,
             time: _getCurrentTime(),
           ));
@@ -1097,6 +1318,7 @@ $context
         final template = intent.params['template'] ?? 'flutter';
         
         String? selectedDirectory = await FilePicker.platform.getDirectoryPath();
+        
         if (selectedDirectory == null) {
           response = '已取消';
           break;
@@ -1256,13 +1478,13 @@ $text
       final language = match.group(1)?.trim() ?? 'txt';
       final code = match.group(2)?.trim() ?? '';
       
-      if (code.isEmpty) continue;
+      if (code.isEmpty || code.length < 10) continue; // 跳过太短的代码
       
       // 根据语言确定文件扩展名
       final extension = fileOperationService.getExtension(language);
       
       // 尝试从代码中提取文件名
-      String fileName = '$baseName$fileIndex$extension';
+      String fileName = '$baseName$fileIndex.$extension';
       
       // 检查代码中是否有文件名注释
       final fileNameMatch = RegExp(r'(?:文件名|filename|file)[:\s]*([a-zA-Z0-9_\-\.]+)').firstMatch(code);
@@ -1275,11 +1497,22 @@ $text
       final file = File(filePath);
       
       try {
+        await file.parent.create(recursive: true);
         await file.writeAsString(code);
         createdFiles.add(filePath);
+        
+        // 添加到已保存文件列表
+        _savedFiles.add(SavedFile(
+          path: filePath,
+          content: code,
+          extension: extension,
+          savedAt: DateTime.now(),
+        ));
+        
         fileIndex++;
       } catch (e) {
         // 保存失败，继续下一个
+        debugPrint('Failed to save file: $e');
       }
     }
     
@@ -1300,19 +1533,47 @@ $text
 
   void _showApiKeyDialog() {
     final controller = TextEditingController(text: aiService.apiKey);
+    final isValidating = ValueNotifier(false);
+    
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text('${aiService.selectedModel} API Key'),
+        title: Row(
+          children: [
+            Text('${aiService.selectedModel} API Key'),
+            const SizedBox(width: 8),
+            if (aiService.isValidating)
+              const SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            else if (aiService.apiKey.isNotEmpty)
+              Icon(
+                aiService.isApiKeyValid == true ? Icons.check_circle : Icons.error,
+                size: 20,
+                color: aiService.isApiKeyValid == true ? Colors.green : Colors.red,
+              ),
+          ],
+        ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             TextField(
               controller: controller,
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 hintText: '输入API Key',
-                border: OutlineInputBorder(),
+                border: const OutlineInputBorder(),
+                suffixIcon: controller.text.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.clear),
+                        onPressed: () => controller.clear(),
+                      )
+                    : null,
               ),
+              onChanged: (_) {
+                // 清除验证状态当用户编辑时
+              },
             ),
             const SizedBox(height: 12),
             Text(
@@ -1330,33 +1591,56 @@ $text
                 color: Theme.of(context).colorScheme.primary,
               ),
             ),
+            const SizedBox(height: 16),
+            ValueListenableBuilder<bool>(
+              valueListenable: isValidating,
+              builder: (context, validating, _) {
+                return Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: [
+                    OutlinedButton.icon(
+                      onPressed: validating
+                          ? null
+                          : () async {
+                              isValidating.value = true;
+                              await aiService.saveApiKey(controller.text.trim());
+                              isValidating.value = false;
+                              if (context.mounted) Navigator.pop(context);
+                            },
+                      icon: const Icon(Icons.save),
+                      label: const Text('保存'),
+                    ),
+                    if (aiService.apiKey.isNotEmpty)
+                      FilledButton.icon(
+                        onPressed: validating
+                            ? null
+                            : () async {
+                                isValidating.value = true;
+                                final isValid = await aiService.validateApiKey();
+                                isValidating.value = false;
+                                if (context.mounted) {
+                                  Navigator.pop(context);
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text(isValid ? 'API Key 有效 ✓' : 'API Key 无效'),
+                                      backgroundColor: isValid ? Colors.green : Colors.red,
+                                    ),
+                                  );
+                                }
+                              },
+                        icon: const Icon(Icons.verified),
+                        label: const Text('验证'),
+                      ),
+                  ],
+                );
+              },
+            ),
           ],
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
             child: const Text('取消'),
-          ),
-          FilledButton(
-            onPressed: () async {
-              final key = controller.text.trim();
-              if (key.isEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('请输入API Key')),
-                );
-                return;
-              }
-              
-              final success = await aiService.saveApiKey(key);
-              if (success && mounted) {
-                Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('API Key已保存')),
-                );
-                setState(() {});
-              }
-            },
-            child: const Text('保存'),
           ),
         ],
       ),
@@ -1574,6 +1858,21 @@ class ChatMessage {
   });
 }
 
+/// 已保存的文件
+class SavedFile {
+  final String path;
+  final String content;
+  final String extension;
+  final DateTime savedAt;
+  
+  SavedFile({
+    required this.path,
+    required this.content,
+    required this.extension,
+    required this.savedAt,
+  });
+}
+
 /// 创建项目底部弹窗
 class _CreateProjectSheet extends StatefulWidget {
   final Function(String name, String template) onProjectCreated;
@@ -1598,7 +1897,7 @@ class _CreateProjectSheetState extends State<_CreateProjectSheet> {
         children: [
           Row(
             children: [
-              const Icon(Icons.create_new_folder, color: Colors.blue),
+              const Icon(Icons.create_new_folder),
               const SizedBox(width: 8),
               Text(
                 '创建项目',
@@ -1616,19 +1915,33 @@ class _CreateProjectSheetState extends State<_CreateProjectSheet> {
             ),
           ),
           const SizedBox(height: 16),
-          Text(
-            '选择模板',
-            style: Theme.of(context).textTheme.titleSmall,
-          ),
+          const Text('选择模板'),
           const SizedBox(height: 8),
           Wrap(
             spacing: 8,
             runSpacing: 8,
             children: [
-              _buildTemplateChip('flutter', 'Flutter', Icons.flutter_dash, Colors.blue),
-              _buildTemplateChip('python', 'Python', Icons.code, Colors.green),
-              _buildTemplateChip('nodejs', 'Node.js', Icons.javascript, Colors.amber),
-              _buildTemplateChip('android', 'Android', Icons.android, Colors.teal),
+              ChoiceChip(
+                label: const Text('Flutter'),
+                selected: _selectedTemplate == 'flutter',
+                onSelected: (selected) {
+                  if (selected) setState(() => _selectedTemplate = 'flutter');
+                },
+              ),
+              ChoiceChip(
+                label: const Text('Python'),
+                selected: _selectedTemplate == 'python',
+                onSelected: (selected) {
+                  if (selected) setState(() => _selectedTemplate = 'python');
+                },
+              ),
+              ChoiceChip(
+                label: const Text('Node.js'),
+                selected: _selectedTemplate == 'nodejs',
+                onSelected: (selected) {
+                  if (selected) setState(() => _selectedTemplate = 'nodejs');
+                },
+              ),
             ],
           ),
           const SizedBox(height: 24),
@@ -1646,32 +1959,11 @@ class _CreateProjectSheetState extends State<_CreateProjectSheet> {
                 widget.onProjectCreated(name, _selectedTemplate);
               },
               icon: const Icon(Icons.add),
-              label: const Text('创建项目'),
+              label: const Text('创建'),
             ),
           ),
-          const SizedBox(height: 8),
         ],
       ),
-    );
-  }
-
-  Widget _buildTemplateChip(String value, String label, IconData icon, Color color) {
-    final isSelected = _selectedTemplate == value;
-    return FilterChip(
-      selected: isSelected,
-      label: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 16, color: isSelected ? Colors.white : color),
-          const SizedBox(width: 4),
-          Text(label),
-        ],
-      ),
-      selectedColor: color,
-      checkmarkColor: Colors.white,
-      onSelected: (selected) {
-        setState(() => _selectedTemplate = value);
-      },
     );
   }
 }

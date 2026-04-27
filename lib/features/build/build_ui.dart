@@ -733,6 +733,7 @@ class _BuildPageState extends ConsumerState<BuildPage> {
     final result = await buildService.triggerBuild(
       projectName: config.projectName,
       buildType: config.buildType,
+      projectPath: config.projectPath,
     );
 
     if (mounted && result == null) {

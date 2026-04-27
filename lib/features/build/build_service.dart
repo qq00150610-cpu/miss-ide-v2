@@ -4,8 +4,10 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
+import 'package:archive/archive_io.dart';
 import 'build_config.dart';
 
 /// GitHub Token 存储键
@@ -119,16 +121,20 @@ class BuildService {
     buildNumber: json['buildNumber'],
   );
 
-  /// 触发 GitHub Actions 构建
+  /// 触发构建
   Future<BuildHistoryItem?> triggerBuild({
     required String projectName,
     BuildType buildType = BuildType.debug,
     String? branch,
     String? workflowId,
+    String? projectPath,
   }) async {
     _log('开始触发构建...');
     _log('项目: $projectName');
     _log('类型: ${buildType.label}');
+    if (projectPath != null) {
+      _log('项目路径: $projectPath');
+    }
 
     final buildId = 'build_${DateTime.now().millisecondsSinceEpoch}';
     final startTime = DateTime.now();
@@ -163,6 +169,7 @@ class BuildService {
           return await _buildViaBackend(
             buildItem: buildItem,
             buildType: buildType,
+            projectPath: projectPath,
           );
         }
 
@@ -213,6 +220,7 @@ class BuildService {
         return await _buildViaBackend(
           buildItem: buildItem,
           buildType: buildType,
+          projectPath: projectPath,
         );
       }
     } catch (e) {
@@ -223,6 +231,7 @@ class BuildService {
       return await _buildViaBackend(
         buildItem: buildItem,
         buildType: buildType,
+        projectPath: projectPath,
       );
     }
   }
@@ -231,11 +240,17 @@ class BuildService {
   Future<BuildHistoryItem?> _buildViaBackend({
     required BuildHistoryItem buildItem,
     required BuildType buildType,
+    String? projectPath,
   }) async {
     _log('尝试连接后端构建服务...');
     
     try {
-      // 启动构建
+      // 如果有项目路径，打包上传
+      if (projectPath != null && projectPath.isNotEmpty) {
+        return await _uploadAndBuild(projectPath, buildItem, buildType);
+      }
+      
+      // 默认构建 miss-ide-v2
       final response = await http.post(
         Uri.parse('$_backendApi/api/build/start'),
         headers: {'Content-Type': 'application/json'},
@@ -272,6 +287,94 @@ class BuildService {
       // 尝试本地构建
       return await _startLocalBuild(buildItem, buildType);
     }
+  }
+
+  /// 上传项目并构建
+  Future<BuildHistoryItem?> _uploadAndBuild(
+    String projectPath,
+    BuildHistoryItem buildItem,
+    BuildType buildType,
+  ) async {
+    _log('正在打包项目...');
+    
+    try {
+      // 创建项目 zip
+      final projectDir = Directory(projectPath);
+      if (!await projectDir.exists()) {
+        throw Exception('项目目录不存在: $projectPath');
+      }
+      
+      // 创建临时 zip 文件
+      final tempDir = await getTemporaryDirectory();
+      final zipPath = p.join(tempDir.path, 'project_${DateTime.now().millisecondsSinceEpoch}.zip');
+      
+      // 使用系统 zip 命令打包
+      final zipResult = await Process.run(
+        'zip',
+        ['-r', zipPath, '.'],
+        workingDirectory: projectPath,
+      );
+      
+      if (zipResult.exitCode != 0) {
+        // zip 命令失败，尝试手动打包
+        await _createZipManually(projectPath, zipPath);
+      }
+      
+      _log('项目已打包，正在上传...');
+      
+      // 上传到后端
+      final request = http.MultipartRequest(
+        'POST',
+        Uri.parse('$_backendApi/api/build/upload'),
+      );
+      request.files.add(await http.MultipartFile.fromPath('project', zipPath));
+      request.fields['type'] = buildType.value;
+      
+      final response = await request.send().timeout(const Duration(minutes: 5));
+      final responseBody = await response.stream.bytesToString();
+      
+      // 清理临时文件
+      await File(zipPath).delete();
+      
+      if (response.statusCode == 200) {
+        final data = jsonDecode(responseBody);
+        final buildId = data['build_id'];
+        
+        _log('上传成功，Build ID: $buildId');
+        
+        var updatedItem = buildItem.copyWith(
+          status: BuildStatus.running,
+        );
+        _currentBuild = updatedItem;
+        _buildStatusController.add(updatedItem);
+        
+        // 轮询构建状态
+        await _pollBackendBuildStatus(buildId, updatedItem);
+        
+        return updatedItem;
+      } else {
+        throw Exception('上传失败: ${response.statusCode}');
+      }
+    } catch (e) {
+      _log('上传构建失败: $e');
+      return await _startLocalBuild(buildItem, buildType);
+    }
+  }
+  
+  /// 手动创建 zip 文件
+  Future<void> _createZipManually(String sourceDir, String zipPath) async {
+    final encoder = ZipFileEncoder();
+    encoder.create(zipPath);
+    
+    final source = Directory(sourceDir);
+    await for (final entity in source.list(recursive: true)) {
+      if (entity is File) {
+        final relativePath = p.relative(entity.path, from: sourceDir);
+        encoder.addFile(entity, relativePath);
+      }
+    }
+    
+    encoder.close();
   }
 
   /// 本地构建（使用 flutter build apk）

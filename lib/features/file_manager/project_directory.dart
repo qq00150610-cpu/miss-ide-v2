@@ -2,7 +2,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 
-/// 文件/目录项数据模型
+/// 文件树项
 class FileTreeItem {
   final String name;
   final String path;
@@ -23,17 +23,11 @@ class FileTreeItem {
 class ProjectDirectoryPanel extends StatefulWidget {
   final String projectPath;
   final Function(String) onFileSelected;
-  final bool isExpanded;
-  final VoidCallback onToggle;
-  final List<String>? expandedPaths;
 
   const ProjectDirectoryPanel({
     super.key,
     required this.projectPath,
     required this.onFileSelected,
-    required this.isExpanded,
-    required this.onToggle,
-    this.expandedPaths,
   });
 
   @override
@@ -41,263 +35,53 @@ class ProjectDirectoryPanel extends StatefulWidget {
 }
 
 class _ProjectDirectoryPanelState extends State<ProjectDirectoryPanel> {
-  List<FileTreeItem> _fileTree = [];
-  Set<String> _expandedPaths = {};
+  List<FileTreeItem>? _rootItems;
   bool _isLoading = true;
 
   @override
   void initState() {
     super.initState();
     _loadDirectory();
-    if (widget.expandedPaths != null) {
-      _expandedPaths.addAll(widget.expandedPaths!);
-    }
-  }
-
-  @override
-  void didUpdateWidget(ProjectDirectoryPanel oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.projectPath != widget.projectPath) {
-      _loadDirectory();
-    }
   }
 
   Future<void> _loadDirectory() async {
-    setState(() => _isLoading = true);
-    
     try {
-      final items = await _buildFileTree(widget.projectPath);
+      final items = await _readDirectory(widget.projectPath);
       setState(() {
-        _fileTree = items;
+        _rootItems = items;
         _isLoading = false;
       });
     } catch (e) {
       setState(() {
-        _fileTree = [];
         _isLoading = false;
       });
     }
   }
 
-  Future<List<FileTreeItem>> _buildFileTree(String path) async {
+  Future<List<FileTreeItem>> _readDirectory(String path) async {
     final dir = Directory(path);
     if (!await dir.exists()) return [];
 
+    final entities = await dir.list().toList();
+    entities.sort((a, b) {
+      if (a is Directory && b is! Directory) return -1;
+      if (a is! Directory && b is Directory) return 1;
+      return p.basename(a.path).compareTo(p.basename(b.path));
+    });
+
     final items = <FileTreeItem>[];
-    
-    try {
-      final entities = await dir.list().toList();
-      
-      // 排序：文件夹在前，文件在后，再按名称排序
-      entities.sort((a, b) {
-        final aIsDir = a is Directory;
-        final bIsDir = b is Directory;
-        if (aIsDir && !bIsDir) return -1;
-        if (!aIsDir && bIsDir) return 1;
-        return p.basename(a.path).toLowerCase().compareTo(p.basename(b.path).toLowerCase());
-      });
+    for (var entity in entities) {
+      final name = p.basename(entity.path);
+      if (name.startsWith('.')) continue;
 
-      for (final entity in entities) {
-        final name = p.basename(entity.path);
-        
-        // 跳过隐藏文件和目录
-        if (name.startsWith('.')) continue;
-
-        if (entity is Directory) {
-          items.add(FileTreeItem(
-            name: name,
-            path: entity.path,
-            isDirectory: true,
-            isExpanded: _expandedPaths.contains(entity.path),
-          ));
-        } else if (entity is File) {
-          items.add(FileTreeItem(
-            name: name,
-            path: entity.path,
-            isDirectory: false,
-          ));
-        }
-      }
-    } catch (e) {
-      // 权限错误等
+      items.add(FileTreeItem(
+        name: name,
+        path: entity.path,
+        isDirectory: entity is Directory,
+        children: entity is Directory ? [] : const [],
+      ));
     }
-    
     return items;
-  }
-
-  Future<void> _loadChildren(FileTreeItem item) async {
-    if (item.children.isNotEmpty) return;
-    
-    final children = await _buildFileTree(item.path);
-    
-    setState(() {
-      final index = _fileTree.indexWhere((f) => f.path == item.path);
-      if (index >= 0) {
-        // 直接修改引用会导致UI不更新，需要重新构建
-        _refreshTree();
-      }
-    });
-  }
-
-  void _refreshTree() {
-    // 简单刷新整个树
-    _loadDirectory();
-  }
-
-  void _toggleExpand(FileTreeItem item) {
-    setState(() {
-      item.isExpanded = !item.isExpanded;
-      if (item.isExpanded) {
-        _expandedPaths.add(item.path);
-      } else {
-        _expandedPaths.remove(item.path);
-      }
-    });
-    
-    if (item.isExpanded && item.children.isEmpty) {
-      _loadChildren(item);
-    }
-  }
-
-  IconData _getFileIcon(String fileName) {
-    final ext = fileName.split('.').last.toLowerCase();
-    
-    // 代码文件
-    if (['dart', 'js', 'ts', 'jsx', 'tsx', 'py', 'rb', 'go', 'rs', 'java', 'kt', 'swift'].contains(ext)) {
-      return Icons.code;
-    }
-    
-    // Web
-    if (['html', 'htm', 'css', 'scss', 'sass', 'less'].contains(ext)) {
-      return Icons.web;
-    }
-    
-    // 配置
-    if (['json', 'yaml', 'yml', 'toml', 'xml', 'ini', 'env', 'properties'].contains(ext)) {
-      return Icons.settings;
-    }
-    
-    // 文档
-    if (['md', 'txt', 'doc', 'docx', 'pdf'].contains(ext)) {
-      return Icons.description;
-    }
-    
-    // 图片
-    if (['png', 'jpg', 'jpeg', 'gif', 'svg', 'ico', 'webp'].contains(ext)) {
-      return Icons.image;
-    }
-    
-    // 压缩包
-    if (['zip', 'rar', 'tar', 'gz', '7z'].contains(ext)) {
-      return Icons.archive;
-    }
-    
-    return Icons.insert_drive_file;
-  }
-
-  Color _getFileColor(String fileName, bool isDirectory) {
-    if (isDirectory) return Colors.amber.shade700;
-    
-    final ext = fileName.split('.').last.toLowerCase();
-    
-    // 代码文件
-    if (['dart'].contains(ext)) return Colors.blue;
-    if (['js', 'ts', 'jsx', 'tsx'].contains(ext)) return Colors.amber;
-    if (['py'].contains(ext)) return Colors.green;
-    if (['java'].contains(ext)) return Colors.orange;
-    if (['kt', 'swift'].contains(ext)) return Colors.purple;
-    if (['go'].contains(ext)) return Colors.cyan;
-    if (['rs'].contains(ext)) return Colors.deepOrange;
-    
-    // Web
-    if (['html', 'htm'].contains(ext)) return Colors.orange;
-    if (['css', 'scss', 'sass', 'less'].contains(ext)) return Colors.blue;
-    
-    // 配置
-    if (['json'].contains(ext)) return Colors.amber;
-    if (['yaml', 'yml'].contains(ext)) return Colors.cyan;
-    if (['xml'].contains(ext)) return Colors.green;
-    
-    // 文档
-    if (['md'].contains(ext)) return Colors.blue;
-    
-    return Colors.grey;
-  }
-
-  Widget _buildTreeItem(FileTreeItem item, {int depth = 0}) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        InkWell(
-          onTap: () {
-            if (item.isDirectory) {
-              _toggleExpand(item);
-            } else {
-              widget.onFileSelected(item.path);
-            }
-          },
-          child: Container(
-            height: 28,
-            padding: EdgeInsets.only(left: 8.0 + depth * 16.0, right: 8.0),
-            child: Row(
-              children: [
-                if (item.isDirectory)
-                  Icon(
-                    item.isExpanded ? Icons.expand_more : Icons.chevron_right,
-                    size: 18,
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  )
-                else
-                  const SizedBox(width: 18),
-                const SizedBox(width: 4),
-                Icon(
-                  item.isDirectory
-                      ? (item.isExpanded ? Icons.folder_open : Icons.folder)
-                      : _getFileIcon(item.name),
-                  size: 16,
-                  color: _getFileColor(item.name, item.isDirectory),
-                ),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Text(
-                    item.name,
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Theme.of(context).colorScheme.onSurface,
-                    ),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-        if (item.isDirectory && item.isExpanded)
-          FutureBuilder<List<FileTreeItem>>(
-            future: _buildFileTree(item.path),
-            builder: (context, snapshot) {
-              if (!snapshot.hasData || snapshot.data!.isEmpty) {
-                return const SizedBox.shrink();
-              }
-              
-              return Column(
-                children: snapshot.data!.map((child) {
-                  return _buildTreeItem(
-                    FileTreeItem(
-                      name: child.name,
-                      path: child.path,
-                      isDirectory: child.isDirectory,
-                      children: child.children,
-                      isExpanded: _expandedPaths.contains(child.path),
-                    ),
-                    depth: depth + 1,
-                  );
-                }).toList(),
-              );
-            },
-          ),
-      ],
-    );
   }
 
   @override
@@ -308,83 +92,144 @@ class _ProjectDirectoryPanelState extends State<ProjectDirectoryPanel> {
         children: [
           // 标题栏
           Container(
-            height: 36,
-            padding: const EdgeInsets.symmetric(horizontal: 8),
+            padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.surfaceVariant,
-              border: Border(
-                bottom: BorderSide(
-                  color: Theme.of(context).dividerColor,
-                ),
-              ),
+              color: Theme.of(context).colorScheme.primaryContainer,
             ),
             child: Row(
               children: [
-                Icon(
-                  Icons.folder,
-                  size: 16,
-                  color: Theme.of(context).colorScheme.primary,
-                ),
-                const SizedBox(width: 6),
+                const Icon(Icons.folder, size: 16),
+                const SizedBox(width: 8),
                 Expanded(
                   child: Text(
                     p.basename(widget.projectPath),
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w500,
-                      color: Theme.of(context).colorScheme.onSurface,
-                    ),
+                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
                 IconButton(
                   icon: const Icon(Icons.refresh, size: 16),
+                  onPressed: () {
+                    setState(() {
+                      _isLoading = true;
+                    });
+                    _loadDirectory();
+                  },
                   padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(
-                    minWidth: 24,
-                    minHeight: 24,
-                  ),
-                  onPressed: _loadDirectory,
-                  tooltip: '刷新',
+                  constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
                 ),
               ],
             ),
           ),
-          
-          // 目录内容
+          // 文件树
           Expanded(
             child: _isLoading
-                ? const Center(
-                    child: SizedBox(
-                      width: 24,
-                      height: 24,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    ),
-                  )
-                : _fileTree.isEmpty
-                    ? Center(
-                        child: Text(
-                          '空目录',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Theme.of(context).colorScheme.onSurfaceVariant,
-                          ),
-                        ),
-                      )
-                    : ListView(
-                        children: _fileTree.map((item) {
-                          return _buildTreeItem(item);
-                        }).toList(),
+                ? const Center(child: CircularProgressIndicator())
+                : _rootItems == null || _rootItems!.isEmpty
+                    ? const Center(child: Text('空目录', style: TextStyle(fontSize: 12)))
+                    : ListView.builder(
+                        itemCount: _rootItems!.length,
+                        itemBuilder: (context, index) {
+                          return _buildTreeItem(_rootItems![index], 0);
+                        },
                       ),
           ),
         ],
       ),
     );
   }
+
+  Widget _buildTreeItem(FileTreeItem item, int level) {
+    final indent = level * 16.0;
+
+    if (item.isDirectory) {
+      return ExpansionTile(
+        tilePadding: EdgeInsets.only(left: indent, right: 8),
+        leading: Icon(
+          item.isExpanded ? Icons.folder_open : Icons.folder,
+          size: 18,
+          color: Colors.amber,
+        ),
+        title: Text(
+          item.name,
+          style: const TextStyle(fontSize: 12),
+        ),
+        onExpansionChanged: (expanded) async {
+          if (expanded && item.children.isEmpty) {
+            final children = await _readDirectory(item.path);
+            setState(() {
+              item.children.clear();
+              item.children.addAll(children);
+              item.isExpanded = true;
+            });
+          }
+        },
+        children: item.children.map((child) => _buildTreeItem(child, level + 1)).toList(),
+      );
+    } else {
+      return InkWell(
+        onTap: () => widget.onFileSelected(item.path),
+        child: Padding(
+          padding: EdgeInsets.only(left: indent + 28, top: 8, bottom: 8, right: 8),
+          child: Row(
+            children: [
+              Icon(_getFileIcon(item.name), size: 16, color: _getFileColor(item.name)),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  item.name,
+                  style: const TextStyle(fontSize: 12),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+  }
+
+  IconData _getFileIcon(String fileName) {
+    final ext = fileName.split('.').last.toLowerCase();
+    switch (ext) {
+      case 'dart': return Icons.code;
+      case 'java': return Icons.coffee;
+      case 'kt': return Icons.code;
+      case 'py': return Icons.code;
+      case 'js': return Icons.javascript;
+      case 'html': return Icons.html;
+      case 'css': return Icons.style;
+      case 'json': return Icons.data_object;
+      case 'yaml':
+      case 'yml': return Icons.settings;
+      case 'md': return Icons.description;
+      case 'xml': return Icons.code;
+      case 'png':
+      case 'jpg':
+      case 'jpeg':
+      case 'gif': return Icons.image;
+      default: return Icons.insert_drive_file;
+    }
+  }
+
+  Color _getFileColor(String fileName) {
+    final ext = fileName.split('.').last.toLowerCase();
+    switch (ext) {
+      case 'dart': return Colors.blue;
+      case 'java': return Colors.orange;
+      case 'kt': return Colors.purple;
+      case 'py': return Colors.green;
+      case 'js': return Colors.yellow;
+      case 'json': return Colors.amber;
+      case 'yaml':
+      case 'yml': return Colors.cyan;
+      default: return Colors.grey;
+    }
+  }
 }
 
-/// 文件树对话框（用于导入后显示）
-class FileTreeDialog extends StatefulWidget {
+/// 文件树对话框
+class FileTreeDialog extends StatelessWidget {
   final String projectPath;
   final String projectName;
 
@@ -394,311 +239,89 @@ class FileTreeDialog extends StatefulWidget {
     required this.projectName,
   });
 
-  @override
-  State<FileTreeDialog> createState() => _FileTreeDialogState();
-}
-
-class _FileTreeDialogState extends State<FileTreeDialog> {
-  List<FileTreeItem> _fileTree = [];
-  bool _isLoading = true;
-
-  @override
-  void initState() {
-    super.initState();
-    _loadDirectory();
-  }
-
-  Future<void> _loadDirectory() async {
-    setState(() => _isLoading = true);
-    
-    try {
-      final items = await _buildFileTree(widget.projectPath, 0, 3);
-      setState(() {
-        _fileTree = items;
-        _isLoading = false;
-      });
-    } catch (e) {
-      setState(() {
-        _fileTree = [];
-        _isLoading = false;
-      });
-    }
-  }
-
-  Future<List<FileTreeItem>> _buildFileTree(String path, int currentDepth, int maxDepth) async {
+  Future<List<FileTreeItem>> _readDirectory(String path, int maxDepth) async {
     final dir = Directory(path);
-    if (!await dir.exists()) return [];
+    if (!await dir.exists() || maxDepth <= 0) return [];
+
+    final entities = await dir.list().toList();
+    entities.sort((a, b) {
+      if (a is Directory && b is! Directory) return -1;
+      if (a is! Directory && b is Directory) return 1;
+      return p.basename(a.path).compareTo(p.basename(b.path));
+    });
 
     final items = <FileTreeItem>[];
-    
-    try {
-      final entities = await dir.list().toList();
-      
-      entities.sort((a, b) {
-        final aIsDir = a is Directory;
-        final bIsDir = b is Directory;
-        if (aIsDir && !bIsDir) return -1;
-        if (!aIsDir && bIsDir) return 1;
-        return p.basename(a.path).toLowerCase().compareTo(p.basename(b.path).toLowerCase());
-      });
+    for (var entity in entities) {
+      final name = p.basename(entity.path);
+      if (name.startsWith('.')) continue;
 
-      int count = 0;
-      for (final entity in entities) {
-        if (count >= 50) break; // 限制显示数量
-        
-        final name = p.basename(entity.path);
-        if (name.startsWith('.')) continue;
-
-        if (entity is Directory) {
-          List<FileTreeItem> children = [];
-          if (currentDepth < maxDepth) {
-            children = await _buildFileTree(entity.path, currentDepth + 1, maxDepth);
-          }
-          
-          items.add(FileTreeItem(
-            name: name,
-            path: entity.path,
-            isDirectory: true,
-            children: children,
-            isExpanded: currentDepth < 1,
-          ));
-          count++;
-        } else if (entity is File) {
-          items.add(FileTreeItem(
-            name: name,
-            path: entity.path,
-            isDirectory: false,
-          ));
-          count++;
-        }
-      }
-    } catch (e) {
-      // 权限错误等
+      items.add(FileTreeItem(
+        name: name,
+        path: entity.path,
+        isDirectory: entity is Directory,
+        children: entity is Directory ? await _readDirectory(entity.path, maxDepth - 1) : [],
+      ));
     }
-    
     return items;
-  }
-
-  IconData _getFileIcon(String fileName, bool isDirectory) {
-    if (isDirectory) return Icons.folder;
-    
-    final ext = fileName.split('.').last.toLowerCase();
-    
-    if (['dart', 'js', 'ts', 'jsx', 'tsx', 'py', 'rb', 'go', 'rs', 'java', 'kt', 'swift'].contains(ext)) {
-      return Icons.code;
-    }
-    if (['html', 'htm', 'css', 'scss', 'sass', 'less'].contains(ext)) {
-      return Icons.web;
-    }
-    if (['json', 'yaml', 'yml', 'toml', 'xml', 'ini', 'env', 'properties'].contains(ext)) {
-      return Icons.settings;
-    }
-    if (['md', 'txt', 'doc', 'docx', 'pdf'].contains(ext)) {
-      return Icons.description;
-    }
-    if (['png', 'jpg', 'jpeg', 'gif', 'svg', 'ico', 'webp'].contains(ext)) {
-      return Icons.image;
-    }
-    if (['zip', 'rar', 'tar', 'gz', '7z'].contains(ext)) {
-      return Icons.archive;
-    }
-    
-    return Icons.insert_drive_file;
-  }
-
-  Color _getFileColor(String fileName, bool isDirectory) {
-    if (isDirectory) return Colors.amber.shade700;
-    
-    final ext = fileName.split('.').last.toLowerCase();
-    
-    if (['dart'].contains(ext)) return Colors.blue;
-    if (['js', 'ts', 'jsx', 'tsx'].contains(ext)) return Colors.amber;
-    if (['py'].contains(ext)) return Colors.green;
-    if (['java'].contains(ext)) return Colors.orange;
-    if (['kt', 'swift'].contains(ext)) return Colors.purple;
-    if (['go'].contains(ext)) return Colors.cyan;
-    if (['rs'].contains(ext)) return Colors.deepOrange;
-    if (['html', 'htm'].contains(ext)) return Colors.orange;
-    if (['css', 'scss', 'sass', 'less'].contains(ext)) return Colors.blue;
-    if (['json'].contains(ext)) return Colors.amber;
-    if (['yaml', 'yml'].contains(ext)) return Colors.cyan;
-    if (['xml'].contains(ext)) return Colors.green;
-    if (['md'].contains(ext)) return Colors.blue;
-    
-    return Colors.grey;
-  }
-
-  Widget _buildTreeItem(FileTreeItem item, {int depth = 0}) {
-    final indent = 16.0 + depth * 16.0;
-    
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        InkWell(
-          onTap: item.isDirectory ? () {
-            setState(() {
-              item.isExpanded = !item.isExpanded;
-            });
-          } : null,
-          child: Container(
-            height: 28,
-            padding: EdgeInsets.only(left: indent, right: 8),
-            child: Row(
-              children: [
-                if (item.isDirectory)
-                  Icon(
-                    item.isExpanded ? Icons.expand_more : Icons.chevron_right,
-                    size: 18,
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  )
-                else
-                  const SizedBox(width: 18),
-                const SizedBox(width: 4),
-                Icon(
-                  item.isDirectory
-                      ? (item.isExpanded ? Icons.folder_open : Icons.folder)
-                      : _getFileIcon(item.name, false),
-                  size: 16,
-                  color: _getFileColor(item.name, item.isDirectory),
-                ),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Text(
-                    item.name,
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Theme.of(context).colorScheme.onSurface,
-                    ),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-        if (item.isDirectory && item.isExpanded && item.children.isNotEmpty)
-          Column(
-            children: item.children.map((child) {
-              return _buildTreeItem(
-                FileTreeItem(
-                  name: child.name,
-                  path: child.path,
-                  isDirectory: child.isDirectory,
-                  children: child.children,
-                  isExpanded: child.isExpanded,
-                ),
-                depth: depth + 1,
-              );
-            }).toList(),
-          ),
-      ],
-    );
   }
 
   @override
   Widget build(BuildContext context) {
-    return Dialog(
-      child: Container(
-        width: 500,
-        height: 450,
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // 标题
-            Row(
-              children: [
-                Icon(
-                  Icons.folder_special,
-                  color: Theme.of(context).colorScheme.primary,
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        '项目已导入',
-                        style: Theme.of(context).textTheme.titleMedium,
-                      ),
-                      Text(
-                        widget.projectPath,
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        ),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
-                  ),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.close),
-                  onPressed: () => Navigator.pop(context),
-                ),
-              ],
-            ),
-            
-            const Divider(),
-            
-            // 文件树
-            Expanded(
-              child: _isLoading
-                  ? const Center(child: CircularProgressIndicator())
-                  : Container(
-                      decoration: BoxDecoration(
-                        color: Theme.of(context).colorScheme.surfaceVariant,
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: _fileTree.isEmpty
-                          ? Center(
-                              child: Text(
-                                '空目录',
-                                style: TextStyle(
-                                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                                ),
-                              ),
-                            )
-                          : ListView(
-                              children: _fileTree.map((item) {
-                                return _buildTreeItem(item);
-                              }).toList(),
-                            ),
-                    ),
-            ),
-            
-            const SizedBox(height: 16),
-            
-            // 提示
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.surfaceVariant,
-                borderRadius: BorderRadius.circular(8),
-              ),
+    return AlertDialog(
+      title: Row(
+        children: [
+          const Icon(Icons.folder_open),
+          const SizedBox(width: 8),
+          Expanded(child: Text(projectName, overflow: TextOverflow.ellipsis)),
+        ],
+      ),
+      content: SizedBox(
+        width: 300,
+        height: 400,
+        child: FutureBuilder<List<FileTreeItem>>(
+          future: _readDirectory(projectPath, 3),
+          builder: (context, snapshot) {
+            if (!snapshot.hasData) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            return ListView.builder(
+              itemCount: snapshot.data!.length,
+              itemBuilder: (context, index) {
+                return _buildTreeItem(snapshot.data![index], 0);
+              },
+            );
+          },
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('关闭'),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildTreeItem(FileTreeItem item, int level) {
+    final indent = level * 16.0;
+    return Padding(
+      padding: EdgeInsets.only(left: indent),
+      child: item.isDirectory
+          ? ExpansionTile(
+              leading: const Icon(Icons.folder, size: 18, color: Colors.amber),
+              title: Text(item.name, style: const TextStyle(fontSize: 12)),
+              children: item.children.map((c) => _buildTreeItem(c, level + 1)).toList(),
+            )
+          : Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
               child: Row(
                 children: [
-                  Icon(
-                    Icons.info_outline,
-                    size: 16,
-                    color: Theme.of(context).colorScheme.primary,
-                  ),
+                  Icon(Icons.insert_drive_file, size: 16, color: Colors.grey[600]),
                   const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      '打开编辑器后，可在左侧查看完整项目结构',
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ),
+                  Text(item.name, style: const TextStyle(fontSize: 12)),
                 ],
               ),
             ),
-          ],
-        ),
-      ),
     );
   }
 }

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../ai/ai_service.dart';
+import '../build/build_service.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -11,6 +13,8 @@ class SettingsPage extends StatefulWidget {
 
 class _SettingsPageState extends State<SettingsPage> {
   bool _darkMode = false;
+  String _githubTokenStatus = '未配置';
+  final _storage = const FlutterSecureStorage();
 
   final List<Map<String, String>> _aiModels = [
     {'name': 'DeepSeek', 'url': 'https://platform.deepseek.com', 'desc': '代码能力强，推荐'},
@@ -28,6 +32,18 @@ class _SettingsPageState extends State<SettingsPage> {
   void initState() {
     super.initState();
     _initService();
+    _loadGitHubTokenStatus();
+  }
+
+  Future<void> _loadGitHubTokenStatus() async {
+    final token = await _storage.read(key: 'github_token');
+    if (mounted) {
+      setState(() {
+        _githubTokenStatus = token != null && token.isNotEmpty 
+            ? '${token.substring(0, 8)}...' 
+            : '未配置';
+      });
+    }
   }
 
   Future<void> _initService() async {
@@ -96,6 +112,26 @@ class _SettingsPageState extends State<SettingsPage> {
                 setState(() {});
               },
             )).toList(),
+          ),
+          
+          // 构建设置
+          _buildSection(
+            '构建服务',
+            [
+              ListTile(
+                leading: const Icon(Icons.cloud),
+                title: const Text('GitHub Token'),
+                subtitle: Text(_githubTokenStatus),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => _showGitHubTokenDialog(),
+              ),
+              ListTile(
+                leading: const Icon(Icons.help_outline),
+                title: const Text('获取 GitHub Token'),
+                subtitle: const Text('GitHub Settings > Developer settings'),
+                onTap: () => _launchUrl('https://github.com/settings/tokens?type=beta'),
+              ),
+            ],
           ),
           
           // 外观设置
@@ -262,6 +298,67 @@ class _SettingsPageState extends State<SettingsPage> {
                   SnackBar(content: Text('${aiService.selectedModel} API Key已保存')),
                 );
                 setState(() {});
+              }
+            },
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showGitHubTokenDialog() {
+    final controller = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('GitHub Token'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              '用于触发 GitHub Actions 构建',
+              style: TextStyle(fontSize: 12, color: Colors.grey),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              decoration: const InputDecoration(
+                hintText: '粘贴 GitHub Personal Access Token',
+                border: OutlineInputBorder(),
+              ),
+              maxLines: 2,
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              '需要 repo 和 workflow 权限',
+              style: TextStyle(fontSize: 11, color: Colors.orange),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () async {
+              final token = controller.text.trim();
+              if (token.isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('请输入 GitHub Token')),
+                );
+                return;
+              }
+              
+              await BuildService.setGitHubToken(token);
+              if (mounted) {
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('GitHub Token 已保存')),
+                );
+                _loadGitHubTokenStatus();
               }
             },
             child: const Text('保存'),

@@ -5,6 +5,7 @@ import 'package:miss_ide/features/editor/code_editor.dart';
 import 'package:miss_ide/features/ai/ai_chat.dart';
 import 'package:miss_ide/features/settings/settings_page.dart';
 import 'package:miss_ide/features/file_manager/file_browser.dart';
+import 'package:miss_ide/features/build/build.dart';
 
 class MissIDEApp extends StatelessWidget {
   const MissIDEApp({super.key});
@@ -36,6 +37,7 @@ class MainPageState extends State<MainPage> {
   final List<Widget> _pages = [
     const FileBrowserPage(),
     const CodeEditorPage(),
+    const BuildPage(),
     const AIChatPage(),
     const SettingsPage(),
   ];
@@ -43,7 +45,7 @@ class MainPageState extends State<MainPage> {
   void openProject(String path) {
     setState(() {
       _projectPathToOpen = path;
-      _currentIndex = 1; // 切换到编辑器页面
+      _currentIndex = 2; // 切换到编辑器页面
     });
   }
 
@@ -71,6 +73,11 @@ class MainPageState extends State<MainPage> {
             icon: Icon(Icons.code_outlined),
             selectedIcon: Icon(Icons.code),
             label: '编辑',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.build_outlined),
+            selectedIcon: Icon(Icons.build),
+            label: '构建',
           ),
           NavigationDestination(
             icon: Icon(Icons.smart_toy_outlined),

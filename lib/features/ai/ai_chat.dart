@@ -176,7 +176,7 @@ class _AIChatPageState extends State<AIChatPage> {
         decoration: BoxDecoration(
           color: message.isUser
             ? Theme.of(context).colorScheme.primaryContainer
-            : Theme.of(context).colorScheme.surfaceContainerHighest,
+            : Theme.of(context).colorScheme.surfaceVariant,
           borderRadius: BorderRadius.circular(16),
         ),
         child: Column(

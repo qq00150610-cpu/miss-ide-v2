@@ -55,7 +55,7 @@ class Example {
           // 文件标签栏
           Container(
             height: 40,
-            color: Theme.of(context).colorScheme.surfaceContainerHighest,
+            color: Theme.of(context).colorScheme.surfaceVariant,
             child: ListView(
               scrollDirection: Axis.horizontal,
               children: [

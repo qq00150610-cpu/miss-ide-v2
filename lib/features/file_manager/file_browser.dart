@@ -220,7 +220,7 @@ class _FileBrowserPageState extends State<FileBrowserPage> {
                               padding: const EdgeInsets.all(12),
                               margin: const EdgeInsets.symmetric(horizontal: 32),
                               decoration: BoxDecoration(
-                                color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                                color: Theme.of(context).colorScheme.surfaceVariant,
                                 borderRadius: BorderRadius.circular(8),
                               ),
                               child: Column(

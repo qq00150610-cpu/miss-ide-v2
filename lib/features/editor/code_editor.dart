@@ -372,7 +372,7 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
           if (_tabs.isNotEmpty)
             Container(
               height: 36,
-              color: Theme.of(context).colorScheme.surfaceContainerHighest,
+              color: Theme.of(context).colorScheme.surfaceVariant,
               child: Row(
                 children: [
                   Expanded(
@@ -443,7 +443,7 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
           Container(
             height: 32,
             padding: const EdgeInsets.symmetric(horizontal: 8),
-            color: Theme.of(context).colorScheme.surfaceContainerHighest,
+            color: Theme.of(context).colorScheme.surfaceVariant,
             child: Row(
               children: [
                 // 语言选择器
@@ -532,7 +532,7 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
                           padding: const EdgeInsets.all(12),
                           margin: const EdgeInsets.symmetric(horizontal: 32),
                           decoration: BoxDecoration(
-                            color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                            color: Theme.of(context).colorScheme.surfaceVariant,
                             borderRadius: BorderRadius.circular(8),
                           ),
                           child: Column(
@@ -584,7 +584,7 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
                         Container(
                           width: 48,
                           padding: const EdgeInsets.only(top: 16, right: 8),
-                          color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                          color: Theme.of(context).colorScheme.surfaceVariant,
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.end,
                             children: List.generate(
@@ -629,7 +629,7 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
           // 底部状态栏
           Container(
             height: 24,
-            color: Theme.of(context).colorScheme.surfaceContainerHighest,
+            color: Theme.of(context).colorScheme.surfaceVariant,
             child: Row(
               children: [
                 const SizedBox(width: 16),

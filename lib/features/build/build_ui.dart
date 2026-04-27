@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:file_picker/file_picker.dart';
 import 'build_config.dart';
 import 'build_service.dart';
 import 'build_progress.dart';
@@ -119,26 +120,67 @@ class _BuildPageState extends ConsumerState<BuildPage> {
       icon: Icons.folder,
       children: [
         ListTile(
+          leading: const Icon(Icons.folder_open),
+          title: const Text('选择项目目录'),
+          subtitle: Text(
+            config.projectPath.isEmpty ? '点击选择要构建的项目' : config.projectName,
+            style: TextStyle(
+              color: config.projectPath.isEmpty 
+                  ? colorScheme.primary 
+                  : colorScheme.onSurfaceVariant,
+            ),
+          ),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: _selectProjectDirectory,
+        ),
+        if (config.projectPath.isNotEmpty)
+          ListTile(
+            title: const Text('项目路径'),
+            subtitle: Text(
+              config.projectPath.length > 35 
+                  ? '...${config.projectPath.substring(config.projectPath.length - 35)}'
+                  : config.projectPath,
+              style: TextStyle(fontSize: 11, color: colorScheme.onSurfaceVariant),
+            ),
+          ),
+        ListTile(
+          leading: const Icon(Icons.edit),
           title: const Text('项目名称'),
           subtitle: Text(config.projectName),
           trailing: const Icon(Icons.chevron_right),
           onTap: () => _showProjectNameDialog(config),
         ),
-        ListTile(
-          title: const Text('项目路径'),
-          subtitle: Text(
-            config.projectPath.isEmpty ? '使用当前应用' : config.projectPath,
-            style: TextStyle(
-              color: config.projectPath.isEmpty 
-                  ? colorScheme.onSurfaceVariant 
-                  : null,
-            ),
-          ),
-          trailing: const Icon(Icons.chevron_right),
-          onTap: () => _showProjectPathDialog(config),
-        ),
       ],
     );
+  }
+  
+  Future<void> _selectProjectDirectory() async {
+    try {
+      String? selectedDirectory = await FilePicker.platform.getDirectoryPath();
+      if (selectedDirectory == null) return;
+      
+      final name = selectedDirectory.split('/').last;
+      final config = ref.read(buildConfigProvider);
+      ref.read(buildConfigProvider.notifier).state = BuildConfig(
+        projectName: name,
+        projectPath: selectedDirectory,
+        buildType: config.buildType,
+        enableProguard: config.enableProguard,
+        outputPath: config.outputPath,
+      );
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('已选择项目: $name')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('选择失败: $e')),
+        );
+      }
+    }
   }
 
   Widget _buildConfigSection(ColorScheme colorScheme) {

@@ -32,20 +32,30 @@ class MainPage extends StatefulWidget {
 
 class MainPageState extends State<MainPage> {
   int _currentIndex = 0;
-  String? _projectPathToOpen;
+  String? _currentProjectPath;
+  String? _currentProjectName;
   
-  final List<Widget> _pages = [
-    const FileBrowserPage(),
-    const CodeEditorPage(),
-    const BuildPage(),
-    const AIChatPage(),
-    const SettingsPage(),
-  ];
+  late final List<Widget> _pages;
 
-  void openProject(String path) {
+  @override
+  void initState() {
+    super.initState();
+    _pages = [
+      FileBrowserPage(onProjectSelected: _onProjectSelected),
+      CodeEditorPage(projectPath: _currentProjectPath),
+      const BuildPage(),
+      const AIChatPage(),
+      const SettingsPage(),
+    ];
+  }
+
+  void _onProjectSelected(String path, String name) {
     setState(() {
-      _projectPathToOpen = path;
-      _currentIndex = 2; // 切换到编辑器页面
+      _currentProjectPath = path;
+      _currentProjectName = name;
+      _currentIndex = 1; // 切换到编辑器页面
+      // 重建编辑器页面以更新项目路径
+      _pages[1] = CodeEditorPage(projectPath: path);
     });
   }
 

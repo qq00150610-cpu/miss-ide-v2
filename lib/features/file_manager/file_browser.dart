@@ -7,7 +7,9 @@ import 'package:archive/archive.dart';
 import 'project_directory.dart';
 
 class FileBrowserPage extends StatefulWidget {
-  const FileBrowserPage({super.key});
+  final void Function(String path, String name)? onProjectSelected;
+
+  const FileBrowserPage({super.key, this.onProjectSelected});
 
   @override
   State<FileBrowserPage> createState() => _FileBrowserPageState();
@@ -394,7 +396,9 @@ class _FileBrowserPageState extends State<FileBrowserPage> {
   }
 
   void _openProject(ProjectItem project) {
-    _showSuccess('已选择: ${project.name}');
+    // 调用回调，传递项目路径和名称
+    widget.onProjectSelected?.call(project.path, project.name);
+    _showSuccess('已打开: ${project.name}');
   }
 
   void _handleProjectAction(String action, int index) {

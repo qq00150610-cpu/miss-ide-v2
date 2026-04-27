@@ -23,7 +23,7 @@ class Example {
   Example(this.name, this.age);
   
   void sayHello() {
-    print("Hello, I'm $name");
+    print("Hello, I'm \$name");
   }
 }
 ''');

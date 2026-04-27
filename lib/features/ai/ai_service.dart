@@ -41,7 +41,7 @@ class AIService {
     'DeepSeek': AIModelConfig(
       name: 'DeepSeek',
       provider: 'deepseek',
-      apiEndpoint: 'https://api.deepseek.com/v1/chat/completions',
+      apiEndpoint: 'https://api.deepseek.com/chat/completions',
       modelId: 'deepseek-chat',
     ),
     '通义千问': AIModelConfig(
@@ -97,9 +97,13 @@ class AIService {
   /// 初始化
   Future<void> init() async {
     if (_isInitialized) return;
-    final prefs = await SharedPreferences.getInstance();
-    _selectedModel = prefs.getString('ai_selected_model') ?? 'DeepSeek';
-    _apiKey = prefs.getString('ai_api_key_${_selectedModel}') ?? '';
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      _selectedModel = prefs.getString('ai_selected_model') ?? 'DeepSeek';
+      _apiKey = prefs.getString('ai_api_key_${_selectedModel}') ?? '';
+    } catch (e) {
+      debugPrint('AI Service init error: $e');
+    }
     _isInitialized = true;
   }
 
@@ -108,6 +112,9 @@ class AIService {
 
   /// 获取当前API Key
   String get apiKey => _apiKey;
+  
+  /// 检查是否已配置
+  bool get isConfigured => _apiKey.isNotEmpty;
 
   /// 获取所有模型名称
   List<String> get modelNames => _models.keys.toList();
@@ -116,19 +123,22 @@ class AIService {
   Future<void> setModel(String modelName) async {
     if (!_models.containsKey(modelName)) return;
     _selectedModel = modelName;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('ai_selected_model', modelName);
-    // 加载该模型的API Key
-    _apiKey = prefs.getString('ai_api_key_$modelName') ?? '';
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('ai_selected_model', modelName);
+      _apiKey = prefs.getString('ai_api_key_$modelName') ?? '';
+    } catch (e) {
+      debugPrint('Set model error: $e');
+    }
   }
 
   /// 保存API Key
   Future<bool> saveApiKey(String apiKey) async {
     try {
-      _apiKey = apiKey;
+      _apiKey = apiKey.trim();
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('ai_api_key_$_selectedModel', apiKey);
-      debugPrint('API Key saved for $_selectedModel');
+      await prefs.setString('ai_api_key_$_selectedModel', apiKey.trim());
+      debugPrint('API Key saved for $_selectedModel: ${apiKey.substring(0, apiKey.length > 10 ? 10 : apiKey.length)}...');
       return true;
     } catch (e) {
       debugPrint('Failed to save API Key: $e');
@@ -144,40 +154,69 @@ class AIService {
     }
 
     if (_apiKey.isEmpty && config.provider != 'ollama') {
-      return '请先在设置中配置 ${config.name} 的 API Key';
+      return '请先在设置中配置 ${config.name} 的 API Key。\n\n获取地址：${_getKeyUrl(config.name)}';
     }
 
     try {
+      debugPrint('Sending request to ${config.name}...');
+      String response;
+      
       switch (config.provider) {
         case 'deepseek':
-        case 'openai':
-          return await _chatOpenAIStyle(config, userMessage, history);
+          response = await _chatDeepSeek(config, userMessage, history);
+          break;
         case 'qwen':
-          return await _chatQwen(config, userMessage, history);
+          response = await _chatQwen(config, userMessage, history);
+          break;
         case 'zhipu':
-          return await _chatZhipu(config, userMessage, history);
+          response = await _chatZhipu(config, userMessage, history);
+          break;
         case 'gemini':
-          return await _chatGemini(config, userMessage, history);
+          response = await _chatGemini(config, userMessage, history);
+          break;
         case 'claude':
-          return await _chatClaude(config, userMessage, history);
+          response = await _chatClaude(config, userMessage, history);
+          break;
         case 'ollama':
-          return await _chatOllama(config, userMessage, history);
+          response = await _chatOllama(config, userMessage, history);
+          break;
+        case 'openai':
+          response = await _chatOpenAI(config, userMessage, history);
+          break;
         default:
-          return await _chatOpenAIStyle(config, userMessage, history);
+          response = await _chatDeepSeek(config, userMessage, history);
       }
+      
+      debugPrint('Response received: ${response.substring(0, response.length > 50 ? 50 : response.length)}...');
+      return response;
     } catch (e) {
-      return '请求失败: $e';
+      debugPrint('Chat error: $e');
+      return '请求失败: $e\n\n请检查API Key是否正确';
     }
   }
 
-  /// OpenAI风格API调用 (DeepSeek, OpenAI, Minimax等)
-  Future<String> _chatOpenAIStyle(
+  String _getKeyUrl(String modelName) {
+    const urls = {
+      'DeepSeek': 'platform.deepseek.com',
+      '通义千问': 'dashscope.aliyuncs.com',
+      '豆包': 'console.volcengine.com/ark',
+      'Minimax': 'api.minimax.chat',
+      '智谱清言': 'open.bigmodel.cn',
+      'Gemini': 'makersuite.google.com',
+      'GPT-4': 'platform.openai.com',
+      'Claude': 'console.anthropic.com',
+    };
+    return urls[modelName] ?? '';
+  }
+
+  /// DeepSeek API
+  Future<String> _chatDeepSeek(
     AIModelConfig config,
     String userMessage,
     List<AIMessage>? history,
   ) async {
     final messages = <Map<String, dynamic>>[
-      {'role': 'system', 'content': '你是一个专业的编程助手，帮助用户解决代码问题。'},
+      {'role': 'system', 'content': '你是一个专业的编程助手，帮助用户解决代码问题。请用中文回答。'},
       if (history != null) ...history.map((m) => m.toJson()),
       {'role': 'user', 'content': userMessage},
     ];
@@ -185,22 +224,62 @@ class AIService {
     final response = await http.post(
       Uri.parse(config.apiEndpoint),
       headers: {
-        'Content-Type': 'application/json',
+        'Content-Type': 'application/json; charset=utf-8',
         'Authorization': 'Bearer $_apiKey',
       },
-      body: jsonEncode({
+      body: utf8.encode(jsonEncode({
         'model': config.modelId,
         'messages': messages,
         'temperature': 0.7,
         'max_tokens': 2048,
-      }),
+      })),
+    );
+
+    debugPrint('DeepSeek response status: ${response.statusCode}');
+    
+    if (response.statusCode == 200) {
+      final body = utf8.decode(response.bodyBytes);
+      final data = jsonDecode(body);
+      return data['choices'][0]['message']['content'] ?? '无响应内容';
+    } else {
+      final body = utf8.decode(response.bodyBytes);
+      return 'API错误 (${response.statusCode}): $body';
+    }
+  }
+
+  /// OpenAI API
+  Future<String> _chatOpenAI(
+    AIModelConfig config,
+    String userMessage,
+    List<AIMessage>? history,
+  ) async {
+    final messages = <Map<String, dynamic>>[
+      {'role': 'system', 'content': '你是一个专业的编程助手。'},
+      if (history != null) ...history.map((m) => m.toJson()),
+      {'role': 'user', 'content': userMessage},
+    ];
+
+    final response = await http.post(
+      Uri.parse(config.apiEndpoint),
+      headers: {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Authorization': 'Bearer $_apiKey',
+      },
+      body: utf8.encode(jsonEncode({
+        'model': config.modelId,
+        'messages': messages,
+        'temperature': 0.7,
+        'max_tokens': 2048,
+      })),
     );
 
     if (response.statusCode == 200) {
-      final data = jsonDecode(response.body);
+      final body = utf8.decode(response.bodyBytes);
+      final data = jsonDecode(body);
       return data['choices'][0]['message']['content'] ?? '无响应内容';
     } else {
-      return 'API错误 (${response.statusCode}): ${response.body}';
+      final body = utf8.decode(response.bodyBytes);
+      return 'API错误 (${response.statusCode}): $body';
     }
   }
 
@@ -213,10 +292,10 @@ class AIService {
     final response = await http.post(
       Uri.parse(config.apiEndpoint),
       headers: {
-        'Content-Type': 'application/json',
+        'Content-Type': 'application/json; charset=utf-8',
         'Authorization': 'Bearer $_apiKey',
       },
-      body: jsonEncode({
+      body: utf8.encode(jsonEncode({
         'model': config.modelId,
         'input': {
           'messages': [
@@ -224,15 +303,22 @@ class AIService {
             {'role': 'user', 'content': userMessage},
           ],
         },
-        'parameters': {},
-      }),
+      })),
     );
 
     if (response.statusCode == 200) {
-      final data = jsonDecode(response.body);
-      return data['output']['text'] ?? data['output']['choices'][0]['message']['content'] ?? '无响应';
+      final body = utf8.decode(response.bodyBytes);
+      final data = jsonDecode(body);
+      // 通义千问返回格式可能是 output.text 或 output.choices
+      if (data['output'] != null) {
+        return data['output']['text'] ?? 
+               data['output']['choices']?[0]?['message']?['content'] ?? 
+               '无响应';
+      }
+      return '响应格式错误: $body';
     } else {
-      return 'API错误: ${response.body}';
+      final body = utf8.decode(response.bodyBytes);
+      return 'API错误 (${response.statusCode}): $body';
     }
   }
 
@@ -242,27 +328,27 @@ class AIService {
     String userMessage,
     List<AIMessage>? history,
   ) async {
-    final messages = [
-      {'role': 'user', 'content': userMessage},
-    ];
-
     final response = await http.post(
       Uri.parse(config.apiEndpoint),
       headers: {
-        'Content-Type': 'application/json',
+        'Content-Type': 'application/json; charset=utf-8',
         'Authorization': 'Bearer $_apiKey',
       },
-      body: jsonEncode({
+      body: utf8.encode(jsonEncode({
         'model': config.modelId,
-        'messages': messages,
-      }),
+        'messages': [
+          {'role': 'user', 'content': userMessage},
+        ],
+      })),
     );
 
     if (response.statusCode == 200) {
-      final data = jsonDecode(response.body);
+      final body = utf8.decode(response.bodyBytes);
+      final data = jsonDecode(body);
       return data['choices'][0]['message']['content'] ?? '无响应';
     } else {
-      return 'API错误: ${response.body}';
+      final body = utf8.decode(response.bodyBytes);
+      return 'API错误 (${response.statusCode}): $body';
     }
   }
 
@@ -276,8 +362,8 @@ class AIService {
     
     final response = await http.post(
       Uri.parse(url),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({
+      headers: {'Content-Type': 'application/json; charset=utf-8'},
+      body: utf8.encode(jsonEncode({
         'contents': [
           {
             'parts': [
@@ -285,14 +371,16 @@ class AIService {
             ]
           }
         ]
-      }),
+      })),
     );
 
     if (response.statusCode == 200) {
-      final data = jsonDecode(response.body);
+      final body = utf8.decode(response.bodyBytes);
+      final data = jsonDecode(body);
       return data['candidates'][0]['content']['parts'][0]['text'] ?? '无响应';
     } else {
-      return 'API错误: ${response.body}';
+      final body = utf8.decode(response.bodyBytes);
+      return 'API错误 (${response.statusCode}): $body';
     }
   }
 
@@ -305,24 +393,26 @@ class AIService {
     final response = await http.post(
       Uri.parse(config.apiEndpoint),
       headers: {
-        'Content-Type': 'application/json',
+        'Content-Type': 'application/json; charset=utf-8',
         'x-api-key': _apiKey,
         'anthropic-version': '2023-06-01',
       },
-      body: jsonEncode({
+      body: utf8.encode(jsonEncode({
         'model': config.modelId,
         'max_tokens': 2048,
         'messages': [
           {'role': 'user', 'content': userMessage}
         ],
-      }),
+      })),
     );
 
     if (response.statusCode == 200) {
-      final data = jsonDecode(response.body);
+      final body = utf8.decode(response.bodyBytes);
+      final data = jsonDecode(body);
       return data['content'][0]['text'] ?? '无响应';
     } else {
-      return 'API错误: ${response.body}';
+      final body = utf8.decode(response.bodyBytes);
+      return 'API错误 (${response.statusCode}): $body';
     }
   }
 
@@ -334,21 +424,22 @@ class AIService {
   ) async {
     final response = await http.post(
       Uri.parse(config.apiEndpoint),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({
+      headers: {'Content-Type': 'application/json; charset=utf-8'},
+      body: utf8.encode(jsonEncode({
         'model': config.modelId,
         'messages': [
           {'role': 'user', 'content': userMessage}
         ],
         'stream': false,
-      }),
+      })),
     );
 
     if (response.statusCode == 200) {
-      final data = jsonDecode(response.body);
+      final body = utf8.decode(response.bodyBytes);
+      final data = jsonDecode(body);
       return data['message']['content'] ?? '无响应';
     } else {
-      return 'Ollama连接失败，请确保Ollama服务正在运行';
+      return 'Ollama连接失败，请确保Ollama服务正在运行 (localhost:11434)';
     }
   }
 }

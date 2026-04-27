@@ -26,12 +26,13 @@ class MainPage extends StatefulWidget {
   const MainPage({super.key});
 
   @override
-  State<MainPage> createState() => _MainPageState();
+  State<MainPage> createState() => MainPageState();
 }
 
-class _MainPageState extends State<MainPage> {
+class MainPageState extends State<MainPage> {
   int _currentIndex = 0;
-
+  String? _projectPathToOpen;
+  
   final List<Widget> _pages = [
     const FileBrowserPage(),
     const CodeEditorPage(),
@@ -39,10 +40,20 @@ class _MainPageState extends State<MainPage> {
     const SettingsPage(),
   ];
 
+  void openProject(String path) {
+    setState(() {
+      _projectPathToOpen = path;
+      _currentIndex = 1; // 切换到编辑器页面
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: _pages[_currentIndex],
+      body: IndexedStack(
+        index: _currentIndex,
+        children: _pages,
+      ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _currentIndex,
         onDestinationSelected: (index) {

@@ -1,7 +1,7 @@
 miss_ide
 3.2
-file:///app/data/%E6%89%80%E6%9C%89%E5%AF%B9%E8%AF%9D/%E4%B8%BB%E5%AF%B9%E8%AF%9D/MissIDE%E9%A1%B9%E7%9B%AE/v2/miss_ide/
-file:///app/data/%E6%89%80%E6%9C%89%E5%AF%B9%E8%AF%9D/%E4%B8%BB%E5%AF%B9%E8%AF%9D/MissIDE%E9%A1%B9%E7%9B%AE/v2/miss_ide/lib/
+file:///app/data/%E6%89%80%E6%9C%89%E5%AF%B9%E8%AF%9D/%E4%B8%BB%E5%AF%B9%E8%AF%9D/miss-ide-v2/
+file:///app/data/%E6%89%80%E6%9C%89%E5%AF%B9%E8%AF%9D/%E4%B8%BB%E5%AF%B9%E8%AF%9D/miss-ide-v2/lib/
 sky_engine
 3.2
 file:///opt/flutter/bin/cache/pkg/sky_engine/

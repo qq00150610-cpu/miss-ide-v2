@@ -5,15 +5,18 @@ import 'package:file_picker/file_picker.dart';
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'ai_service.dart';
+import 'file_operation_service.dart';
 
 class AIChatPage extends StatefulWidget {
   final Function(String)? onNavigateToEditor;
   final Function(String, String)? onNavigateToFileBrowser;
+  final String? projectPath;  // 当前项目路径
   
   const AIChatPage({
     super.key,
     this.onNavigateToEditor,
     this.onNavigateToFileBrowser,
+    this.projectPath,
   });
 
   @override
@@ -31,6 +34,11 @@ class _AIChatPageState extends State<AIChatPage> {
   // 待保存的代码
   String? _pendingCode;
   String? _pendingLanguage;
+  
+  // 文件操作上下文
+  String? _currentEditFile;
+  String? _lastReadFile;
+  String? _lastReadContent;
 
   @override
   void initState() {
@@ -38,6 +46,19 @@ class _AIChatPageState extends State<AIChatPage> {
     _initService();
     // 设置AI回调
     aiService.onCodeGenerated = _onCodeGenerated;
+    // 初始化文件操作服务
+    if (widget.projectPath != null) {
+      fileOperationService.setProjectPath(widget.projectPath);
+    }
+  }
+
+  @override
+  void didUpdateWidget(AIChatPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // 更新项目路径
+    if (widget.projectPath != oldWidget.projectPath && widget.projectPath != null) {
+      fileOperationService.setProjectPath(widget.projectPath);
+    }
   }
 
   Future<void> _initService() async {
@@ -68,7 +89,19 @@ class _AIChatPageState extends State<AIChatPage> {
           children: [
             const Icon(Icons.smart_toy, size: 24),
             const SizedBox(width: 8),
-            Text('AI 助手 - ${aiService.selectedModel}'),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('AI 助手 - ${aiService.selectedModel}', style: const TextStyle(fontSize: 16)),
+                  if (widget.projectPath != null)
+                    Text(
+                      '项目: ${p.basename(widget.projectPath!)}',
+                      style: TextStyle(fontSize: 10, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                    ),
+                ],
+              ),
+            ),
           ],
         ),
         actions: [
@@ -126,6 +159,33 @@ class _AIChatPageState extends State<AIChatPage> {
               ),
             ),
           
+          // 文件操作上下文提示
+          if (_currentEditFile != null || _lastReadFile != null)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              color: Colors.blue.shade50,
+              child: Row(
+                children: [
+                  const Icon(Icons.folder_open, size: 16, color: Colors.blue),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      _buildContextHint(),
+                      style: TextStyle(fontSize: 12, color: Colors.blue.shade700),
+                    ),
+                  ),
+                  if (_currentEditFile != null)
+                    IconButton(
+                      icon: const Icon(Icons.close, size: 16),
+                      onPressed: () => setState(() => _currentEditFile = null),
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
+                    ),
+                ],
+              ),
+            ),
+          
           // 快捷操作按钮
           if (_showQuickActions)
             Container(
@@ -157,17 +217,17 @@ class _AIChatPageState extends State<AIChatPage> {
                     ),
                     const SizedBox(width: 8),
                     _buildQuickActionChip(
+                      icon: Icons.edit_document,
+                      label: '修改文件',
+                      color: Colors.orange,
+                      onTap: _onEditFile,
+                    ),
+                    const SizedBox(width: 8),
+                    _buildQuickActionChip(
                       icon: Icons.bug_report,
                       label: '调试代码',
                       color: Colors.red,
                       onTap: _onDebugCode,
-                    ),
-                    const SizedBox(width: 8),
-                    _buildQuickActionChip(
-                      icon: Icons.translate,
-                      label: '代码转换',
-                      color: Colors.orange,
-                      onTap: _onConvertCode,
                     ),
                   ],
                 ),
@@ -231,6 +291,14 @@ class _AIChatPageState extends State<AIChatPage> {
                           '当前模型: ${aiService.selectedModel}',
                           style: Theme.of(context).textTheme.bodyMedium,
                         ),
+                        if (widget.projectPath != null)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 8),
+                            child: Chip(
+                              avatar: const Icon(Icons.folder, size: 16),
+                              label: Text('项目: ${p.basename(widget.projectPath!)}'),
+                            ),
+                          ),
                         const SizedBox(height: 16),
                         // 快捷操作示例
                         Wrap(
@@ -238,9 +306,9 @@ class _AIChatPageState extends State<AIChatPage> {
                           runSpacing: 8,
                           alignment: WrapAlignment.center,
                           children: [
-                            _buildSuggestionChip('帮我创建一个Flutter项目'),
+                            _buildSuggestionChip('@read lib/main.dart'),
+                            _buildSuggestionChip('@create utils/helper.dart'),
                             _buildSuggestionChip('写一个快速排序算法'),
-                            _buildSuggestionChip('解释一下这段代码'),
                           ],
                         ),
                         const SizedBox(height: 16),
@@ -298,6 +366,27 @@ class _AIChatPageState extends State<AIChatPage> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
+                // 命令提示
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.surfaceVariant,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.lightbulb_outline, size: 16, color: Theme.of(context).colorScheme.primary),
+                      const SizedBox(width: 8),
+                      const Expanded(
+                        child: Text(
+                          '@read 文件路径 - 读取文件  |  @edit 文件路径 - 修改文件  |  @create 文件路径 - 创建文件',
+                          style: TextStyle(fontSize: 10),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 8),
                 // 代码粘贴区（可折叠）
                 if (_pastedCode != null)
                   Container(
@@ -333,7 +422,7 @@ class _AIChatPageState extends State<AIChatPage> {
                         controller: _messageController,
                         focusNode: _focusNode,
                         decoration: InputDecoration(
-                          hintText: '输入代码问题，或使用快捷操作...',
+                          hintText: '输入问题，或使用 @read/@edit/@create 命令...',
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(24),
                           ),
@@ -371,6 +460,17 @@ class _AIChatPageState extends State<AIChatPage> {
         ],
       ),
     );
+  }
+
+  String _buildContextHint() {
+    final parts = <String>[];
+    if (_currentEditFile != null) {
+      parts.add('编辑文件: $_currentEditFile');
+    }
+    if (_lastReadFile != null) {
+      parts.add('已读文件: $_lastReadFile');
+    }
+    return parts.join(' | ');
   }
 
   String? _pastedCode;
@@ -531,6 +631,92 @@ class _AIChatPageState extends State<AIChatPage> {
     );
   }
 
+  void _onEditFile() {
+    _showFileOperationDialog(
+      title: '修改文件',
+      hintText: '输入要修改的文件路径',
+      buttonText: '开始修改',
+      onSubmit: (filePath) async {
+        Navigator.pop(context);
+        await _handleEditCommand(filePath);
+      },
+    );
+  }
+
+  Future<void> _handleEditCommand(String filePath) async {
+    // 先读取文件内容
+    final readResult = await fileOperationService.readFile(filePath);
+    
+    if (readResult.success) {
+      setState(() {
+        _currentEditFile = filePath;
+        _lastReadFile = filePath;
+        _lastReadContent = readResult.content;
+      });
+      
+      _addMessage(ChatMessage(
+        text: '已读取文件: $filePath\n\n文件内容已加载，现在可以描述你想要做的修改。',
+        isUser: false,
+        time: _getCurrentTime(),
+      ));
+    } else {
+      // 文件不存在，询问是否创建
+      _addMessage(ChatMessage(
+        text: '文件 "$filePath" 不存在。\n\n你可以：\n1. 直接告诉我创建这个文件的内容\n2. 使用 @create 命令创建新文件',
+        isUser: false,
+        time: _getCurrentTime(),
+      ));
+    }
+  }
+
+  void _showFileOperationDialog({
+    required String title,
+    required String hintText,
+    required String buttonText,
+    required Function(String) onSubmit,
+  }) {
+    final controller = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(title),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            TextField(
+              controller: controller,
+              decoration: InputDecoration(
+                hintText: hintText,
+                border: const OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 8),
+            if (widget.projectPath != null)
+              Text(
+                '项目目录: ${widget.projectPath}',
+                style: TextStyle(fontSize: 10, color: Theme.of(context).colorScheme.onSurfaceVariant),
+              ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () {
+              if (controller.text.trim().isEmpty) return;
+              Navigator.pop(context);
+              onSubmit(controller.text.trim());
+            },
+            child: Text(buttonText),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _onDebugCode() {
     _showQuickActionDialog(
       title: '调试代码',
@@ -560,31 +746,6 @@ $code
           time: _getCurrentTime(),
         ));
       },
-    );
-  }
-
-  void _onConvertCode() {
-    showModalBottomSheet(
-      context: context,
-      builder: (context) => _ConvertCodeSheet(
-        onConvert: (fromLang, toLang, code) async {
-          Navigator.pop(context);
-          final prompt = '''请将以下$fromLang代码转换为$toLang代码：
-
-```
-$code
-```
-
-只返回转换后的代码，并简要说明主要改动。''';
-          
-          final response = await aiService.chat(prompt);
-          _addMessage(ChatMessage(
-            text: response,
-            isUser: false,
-            time: _getCurrentTime(),
-          ));
-        },
-      ),
     );
   }
 
@@ -714,6 +875,40 @@ $code
     _scrollToBottom();
   }
 
+  /// 解析并处理特殊命令
+  AICommand? _parseCommand(String text) {
+    final trimmed = text.trim();
+    
+    // @read 命令
+    final readMatch = RegExp(r'^@read\s+(.+)$', caseSensitive: false).firstMatch(trimmed);
+    if (readMatch != null) {
+      return AICommand(
+        type: AICommandType.read,
+        filePath: readMatch.group(1)!.trim(),
+      );
+    }
+    
+    // @edit 命令
+    final editMatch = RegExp(r'^@edit\s+(.+)$', caseSensitive: false).firstMatch(trimmed);
+    if (editMatch != null) {
+      return AICommand(
+        type: AICommandType.edit,
+        filePath: editMatch.group(1)!.trim(),
+      );
+    }
+    
+    // @create 命令
+    final createMatch = RegExp(r'^@create\s+(.+)$', caseSensitive: false).firstMatch(trimmed);
+    if (createMatch != null) {
+      return AICommand(
+        type: AICommandType.create,
+        filePath: createMatch.group(1)!.trim(),
+      );
+    }
+    
+    return null;
+  }
+
   void _sendMessage() async {
     String text = _messageController.text.trim();
     
@@ -736,70 +931,13 @@ $code
     setState(() => _isLoading = true);
 
     try {
-      // 识别意图
-      final intent = aiService.recognizeIntent(text);
-      String response;
-      List<String> createdFiles = [];
+      // 检查是否包含特殊命令
+      final command = _parseCommand(text);
       
-      switch (intent.type) {
-        case AIIntentType.createProject:
-          // 创建项目
-          response = '好的，我来帮您创建项目...\n\n';
-          final name = intent.params['name'] ?? 'my_project';
-          final template = intent.params['template'] ?? 'flutter';
-          
-          String? selectedDirectory = await FilePicker.platform.getDirectoryPath();
-          if (selectedDirectory == null) {
-            response = '已取消';
-            break;
-          }
-          
-          final projectPath = p.join(selectedDirectory, name);
-          if (aiService.isConfigured) {
-            response += await aiService.generateProjectWithAI(projectPath, text);
-          } else {
-            response += await aiService.createProject(projectPath, template);
-          }
-          break;
-          
-        case AIIntentType.generateCode:
-          response = await aiService.generateCode(
-            intent.params['language'] ?? 'dart',
-            text,
-          );
-          // 自动检测并保存代码文件
-          createdFiles = await _autoSaveCodeFromResponse(response, text);
-          if (createdFiles.isNotEmpty) {
-            response += '\n\n---\n✅ 已自动保存 ${createdFiles.length} 个文件';
-          }
-          break;
-          
-        case AIIntentType.explainCode:
-          // 尝试提取代码块
-          final codeMatch = RegExp(r'```[\s\S]*?```').firstMatch(text);
-          if (codeMatch != null) {
-            final code = codeMatch.group(0)!.replaceAll('```', '').trim();
-            response = await aiService.explainCode(code);
-          } else {
-            response = '请提供要解释的代码，可以直接粘贴代码后发送';
-          }
-          break;
-          
-        default:
-          response = await aiService.chat(text);
-          // 检查响应中是否包含代码块，自动保存
-          createdFiles = await _autoSaveCodeFromResponse(response, text);
-          if (createdFiles.isNotEmpty) {
-            response += '\n\n---\n✅ 已自动保存 ${createdFiles.length} 个文件';
-          }
-      }
-      
-      if (mounted) {
-        _addMessage(ChatMessage(
-          text: response,
-          isUser: false,
-          time: _getCurrentTime(),
-        ));
+      if (command != null) {
+        await _handleCommand(command);
+      } else {
+        await _handleNormalMessage(text);
       }
     } catch (e) {
       if (mounted) {
@@ -816,24 +954,297 @@ $code
     }
   }
 
+  /// 处理特殊命令
+  Future<void> _handleCommand(AICommand command) async {
+    switch (command.type) {
+      case AICommandType.read:
+        await _handleReadCommand(command.filePath!);
+        break;
+      case AICommandType.edit:
+        await _handleEditCommand(command.filePath!);
+        break;
+      case AICommandType.create:
+        await _handleCreateCommand(command.filePath!);
+        break;
+    }
+  }
+
+  /// 处理 @read 命令
+  Future<void> _handleReadCommand(String filePath) async {
+    if (widget.projectPath == null) {
+      _addMessage(ChatMessage(
+        text: '请先打开一个项目，然后再读取文件。',
+        isUser: false,
+        time: _getCurrentTime(),
+      ));
+      return;
+    }
+
+    final readResult = await fileOperationService.readFile(filePath);
+    
+    if (readResult.success) {
+      setState(() {
+        _lastReadFile = filePath;
+        _lastReadContent = readResult.content;
+      });
+      
+      // 显示文件内容（限制长度）
+      final content = readResult.content!;
+      final displayContent = content.length > 2000 
+          ? '${content.substring(0, 2000)}\n\n... (内容过长，已截断)' 
+          : content;
+      
+      _addMessage(ChatMessage(
+        text: '✅ 已读取文件: $filePath\n\n```${fileOperationService.inferLanguage(filePath)}\n$displayContent\n```',
+        isUser: false,
+        time: _getCurrentTime(),
+      ));
+    } else {
+      _addMessage(ChatMessage(
+        text: '❌ 读取失败: ${readResult.error}\n\n请检查文件路径是否正确。',
+        isUser: false,
+        time: _getCurrentTime(),
+      ));
+    }
+  }
+
+  /// 处理 @create 命令
+  Future<void> _handleCreateCommand(String filePath) async {
+    if (widget.projectPath == null) {
+      _addMessage(ChatMessage(
+        text: '请先打开一个项目，然后再创建文件。',
+        isUser: false,
+        time: _getCurrentTime(),
+      ));
+      return;
+    }
+
+    // 更新当前编辑文件
+    setState(() {
+      _currentEditFile = filePath;
+    });
+    
+    // 获取上下文
+    String context = '';
+    if (_lastReadContent != null) {
+      context = '\n\n参考已有代码:\n```\n${_lastReadContent!.length > 500 ? '${_lastReadContent!.substring(0, 500)}...' : _lastReadContent}\n```\n';
+    }
+    
+    // 请求AI生成文件内容
+    final prompt = '''请为文件 "$filePath" 生成代码内容。
+
+文件用途描述: (请根据文件名推断文件用途)
+
+$context
+
+请生成完整的、可直接使用的代码。''';
+    
+    if (aiService.isConfigured) {
+      final response = await aiService.chat(prompt);
+      
+      // 提取代码块
+      final codeBlocks = _extractCodeBlocks(response);
+      
+      if (codeBlocks.isNotEmpty) {
+        // 保存代码块到文件
+        final code = codeBlocks.first['code'] as String;
+        final language = codeBlocks.first['language'] as String;
+        
+        final writeResult = await fileOperationService.writeFile(filePath, code);
+        
+        if (writeResult.success) {
+          _addMessage(ChatMessage(
+            text: '✅ 文件已创建: $filePath\n\n\`\`\`$language\n${code.length > 500 ? '${code.substring(0, 500)}...\n(内容过长，已截断显示)' : code}\n\`\`\`\n\n文件已保存到项目目录。',
+            isUser: false,
+            time: _getCurrentTime(),
+          ));
+        } else {
+          _addMessage(ChatMessage(
+            text: '❌ 保存失败: ${writeResult.error}',
+            isUser: false,
+            time: _getCurrentTime(),
+          ));
+        }
+      } else {
+        _addMessage(ChatMessage(
+          text: 'AI响应中未找到可保存的代码。\n\n响应内容:\n$response',
+          isUser: false,
+          time: _getCurrentTime(),
+        ));
+      }
+    } else {
+      _addMessage(ChatMessage(
+        text: '需要配置AI API Key才能自动生成代码。\n\n请先配置API Key，或直接粘贴要保存的代码内容。',
+        isUser: false,
+        time: _getCurrentTime(),
+      ));
+    }
+  }
+
+  /// 处理普通消息
+  Future<void> _handleNormalMessage(String text) async {
+    // 识别意图
+    final intent = aiService.recognizeIntent(text);
+    String response;
+    List<String> createdFiles = [];
+    List<String> editedFiles = [];
+    
+    switch (intent.type) {
+      case AIIntentType.createProject:
+        // 创建项目
+        response = '好的，我来帮您创建项目...\n\n';
+        final name = intent.params['name'] ?? 'my_project';
+        final template = intent.params['template'] ?? 'flutter';
+        
+        String? selectedDirectory = await FilePicker.platform.getDirectoryPath();
+        if (selectedDirectory == null) {
+          response = '已取消';
+          break;
+        }
+        
+        final projectPath = p.join(selectedDirectory, name);
+        if (aiService.isConfigured) {
+          response += await aiService.generateProjectWithAI(projectPath, text);
+        } else {
+          response += await aiService.createProject(projectPath, template);
+        }
+        break;
+        
+      case AIIntentType.generateCode:
+        response = await aiService.generateCode(
+          intent.params['language'] ?? 'dart',
+          text,
+        );
+        // 自动检测并保存代码文件
+        createdFiles = await _autoSaveCodeFromResponse(response, text);
+        if (createdFiles.isNotEmpty) {
+          response += '\n\n---\n✅ 已自动保存 ${createdFiles.length} 个文件';
+        }
+        break;
+        
+      case AIIntentType.explainCode:
+        // 尝试提取代码块
+        final codeMatch = RegExp(r'```[\s\S]*?```').firstMatch(text);
+        if (codeMatch != null) {
+          final code = codeMatch.group(0)!.replaceAll('```', '').trim();
+          response = await aiService.explainCode(code);
+        } else {
+          response = '请提供要解释的代码，可以直接粘贴代码后发送';
+        }
+        break;
+        
+      default:
+        // 在prompt中添加文件上下文
+        String enhancedPrompt = text;
+        if (_lastReadContent != null && _lastReadFile != null) {
+          enhancedPrompt = '''参考文件: $_lastReadFile
+
+$text
+
+---
+
+注意：请结合上面的文件内容来回答问题。如果需要修改文件，请生成完整的修改后代码。''';
+        }
+        
+        response = await aiService.chat(enhancedPrompt);
+        
+        // 如果当前有编辑文件上下文，处理可能的修改
+        if (_currentEditFile != null) {
+          editedFiles = await _handleResponseEdits(response, _currentEditFile!);
+          if (editedFiles.isNotEmpty) {
+            response += '\n\n---\n✅ 已修改 ${editedFiles.length} 个文件';
+          }
+        }
+        
+        // 检查响应中是否包含代码块，自动保存
+        createdFiles = await _autoSaveCodeFromResponse(response, text);
+        if (createdFiles.isNotEmpty) {
+          response += '\n\n---\n✅ 已自动保存 ${createdFiles.length} 个文件';
+        }
+    }
+    
+    if (mounted) {
+      _addMessage(ChatMessage(
+        text: response,
+        isUser: false,
+        time: _getCurrentTime(),
+      ));
+    }
+  }
+
+  /// 处理响应中的编辑
+  Future<List<String>> _handleResponseEdits(String response, String filePath) async {
+    final editedFiles = <String>[];
+    
+    // 检查响应中是否包含代码块（可能是修改后的完整文件）
+    final codeBlocks = _extractCodeBlocks(response);
+    
+    if (codeBlocks.isNotEmpty) {
+      // 如果用户明确说保存修改，则保存
+      if (response.contains('已修改') || 
+          response.contains('已更新') || 
+          response.contains('下面是修改后的代码') ||
+          response.contains('完整代码')) {
+        
+        final code = codeBlocks.first['code'] as String;
+        final result = await fileOperationService.editFile(filePath, code);
+        
+        if (result.success) {
+          editedFiles.add(filePath);
+          // 清空编辑上下文
+          setState(() {
+            _currentEditFile = null;
+          });
+        }
+      }
+    }
+    
+    return editedFiles;
+  }
+
+  /// 从响应中提取代码块
+  List<Map<String, String>> _extractCodeBlocks(String response) {
+    final blocks = <Map<String, String>>[];
+    final pattern = RegExp(r'```(\w*)\n?([\s\S]*?)```', multiLine: true);
+    final matches = pattern.allMatches(response);
+    
+    for (final match in matches) {
+      final language = match.group(1)?.trim() ?? '';
+      final code = match.group(2)?.trim() ?? '';
+      
+      if (code.isNotEmpty) {
+        blocks.add({
+          'language': language,
+          'code': code,
+        });
+      }
+    }
+    
+    return blocks;
+  }
+
   /// 从AI响应中自动提取并保存代码
   Future<List<String>> _autoSaveCodeFromResponse(String response, String userPrompt) async {
     final createdFiles = <String>[];
     
-    // 匹配代码块：```language\n代码\n```
+    // 如果有项目路径，优先保存到项目目录
+    String? saveDir = widget.projectPath;
+    
+    // 匹配代码块
     final codeBlockPattern = RegExp(r'```(\w*)\n([\s\S]*?)```', multiLine: true);
     final matches = codeBlockPattern.allMatches(response);
     
     if (matches.isEmpty) return createdFiles;
     
-    // 获取保存目录
-    String? saveDir = await FilePicker.platform.getDirectoryPath();
-    if (saveDir == null) return createdFiles;
+    // 如果没有项目目录，让用户选择
+    if (saveDir == null) {
+      saveDir = await FilePicker.platform.getDirectoryPath();
+      if (saveDir == null) return createdFiles;
+    }
     
     // 从用户提示中推断项目/文件名
     String baseName = 'generated';
     if (userPrompt.contains('创建') || userPrompt.contains('生成')) {
-      // 尝试提取项目名
       final nameMatch = RegExp(r'(?:创建|生成|写一个|帮我)[\s]*([a-zA-Z_\u4e00-\u9fa5]+)').firstMatch(userPrompt);
       if (nameMatch != null) {
         baseName = nameMatch.group(1)!.replaceAll(RegExp(r'[^\w]'), '_');
@@ -848,7 +1259,7 @@ $code
       if (code.isEmpty) continue;
       
       // 根据语言确定文件扩展名
-      final extension = _getExtensionFromLanguage(language);
+      final extension = fileOperationService.getExtension(language);
       
       // 尝试从代码中提取文件名
       String fileName = '$baseName$fileIndex$extension';
@@ -873,41 +1284,6 @@ $code
     }
     
     return createdFiles;
-  }
-  
-  /// 根据语言获取文件扩展名
-  String _getExtensionFromLanguage(String language) {
-    const extensions = {
-      'dart': '.dart',
-      'python': '.py',
-      'java': '.java',
-      'javascript': '.js',
-      'js': '.js',
-      'typescript': '.ts',
-      'ts': '.ts',
-      'kotlin': '.kt',
-      'swift': '.swift',
-      'go': '.go',
-      'rust': '.rs',
-      'c': '.c',
-      'cpp': '.cpp',
-      'c++': '.cpp',
-      'csharp': '.cs',
-      'c#': '.cs',
-      'html': '.html',
-      'css': '.css',
-      'scss': '.scss',
-      'json': '.json',
-      'xml': '.xml',
-      'yaml': '.yaml',
-      'yml': '.yml',
-      'sql': '.sql',
-      'shell': '.sh',
-      'bash': '.sh',
-      'markdown': '.md',
-      'md': '.md',
-    };
-    return extensions[language.toLowerCase()] ?? '.txt';
   }
 
   void _scrollToBottom() {
@@ -1168,6 +1544,24 @@ $code
   }
 }
 
+/// AI命令类型
+enum AICommandType {
+  read,
+  edit,
+  create,
+}
+
+/// AI命令
+class AICommand {
+  final AICommandType type;
+  final String? filePath;
+  
+  AICommand({
+    required this.type,
+    this.filePath,
+  });
+}
+
 class ChatMessage {
   final String text;
   final bool isUser;
@@ -1278,108 +1672,6 @@ class _CreateProjectSheetState extends State<_CreateProjectSheet> {
       onSelected: (selected) {
         setState(() => _selectedTemplate = value);
       },
-    );
-  }
-}
-
-/// 代码转换底部弹窗
-class _ConvertCodeSheet extends StatefulWidget {
-  final Function(String fromLang, String toLang, String code) onConvert;
-  
-  const _ConvertCodeSheet({required this.onConvert});
-
-  @override
-  State<_ConvertCodeSheet> createState() => _ConvertCodeSheetState();
-}
-
-class _ConvertCodeSheetState extends State<_ConvertCodeSheet> {
-  String _fromLang = 'Python';
-  String _toLang = 'Dart';
-
-  final List<String> _languages = [
-    'Python', 'Dart', 'Java', 'JavaScript', 'TypeScript',
-    'Go', 'Rust', 'C', 'C++', 'Swift', 'Kotlin', 'Ruby',
-  ];
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Icon(Icons.translate, color: Colors.orange),
-              const SizedBox(width: 8),
-              Text(
-                '代码转换',
-                style: Theme.of(context).textTheme.titleLarge,
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              Expanded(
-                child: DropdownButtonFormField<String>(
-                  value: _fromLang,
-                  decoration: const InputDecoration(
-                    labelText: '源语言',
-                    border: OutlineInputBorder(),
-                  ),
-                  items: _languages.map((lang) {
-                    return DropdownMenuItem(value: lang, child: Text(lang));
-                  }).toList(),
-                  onChanged: (value) {
-                    setState(() => _fromLang = value!);
-                  },
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Icon(Icons.arrow_forward, color: Theme.of(context).colorScheme.primary),
-              ),
-              Expanded(
-                child: DropdownButtonFormField<String>(
-                  value: _toLang,
-                  decoration: const InputDecoration(
-                    labelText: '目标语言',
-                    border: OutlineInputBorder(),
-                  ),
-                  items: _languages.map((lang) {
-                    return DropdownMenuItem(value: lang, child: Text(lang));
-                  }).toList(),
-                  onChanged: (value) {
-                    setState(() => _toLang = value!);
-                  },
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          Text(
-            '请在聊天框中粘贴要转换的代码',
-            style: TextStyle(
-              fontSize: 12,
-              color: Theme.of(context).colorScheme.onSurfaceVariant,
-            ),
-          ),
-          const SizedBox(height: 16),
-          SizedBox(
-            width: double.infinity,
-            child: FilledButton.icon(
-              onPressed: () {
-                widget.onConvert(_fromLang, _toLang, '');
-              },
-              icon: const Icon(Icons.swap_horiz),
-              label: const Text('开始转换'),
-            ),
-          ),
-          const SizedBox(height: 8),
-        ],
-      ),
     );
   }
 }

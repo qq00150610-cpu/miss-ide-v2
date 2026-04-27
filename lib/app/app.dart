@@ -44,7 +44,7 @@ class MainPageState extends State<MainPage> {
       FileBrowserPage(onProjectSelected: _onProjectSelected),
       CodeEditorPage(projectPath: _currentProjectPath),
       const BuildPage(),
-      const AIChatPage(),
+      AIChatPage(projectPath: _currentProjectPath),  // 传递项目路径
       const SettingsPage(),
     ];
   }
@@ -56,6 +56,8 @@ class MainPageState extends State<MainPage> {
       _currentIndex = 1; // 切换到编辑器页面
       // 重建编辑器页面以更新项目路径
       _pages[1] = CodeEditorPage(projectPath: path);
+      // 重建AI聊天页面以传递新的项目路径
+      _pages[3] = AIChatPage(projectPath: path);
     });
   }
 

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:path/path.dart' as p;
 import 'build_config.dart';
 import 'build_service.dart';
 import 'build_progress.dart';
@@ -811,11 +812,59 @@ class _BuildPageState extends ConsumerState<BuildPage> {
           ),
           FilledButton(
             onPressed: () async {
-              // TODO: 实现密钥库生成
               Navigator.pop(context);
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('密钥库生成功能开发中...')),
+              
+              // 获取密钥库保存路径
+              String? savePath = await FilePicker.platform.getDirectoryPath();
+              if (savePath == null) return;
+              
+              final keystorePath = p.join(savePath, keystoreController.text);
+              final password = passwordController.text;
+              final alias = aliasController.text;
+              final keyPassword = keyPasswordController.text;
+              
+              if (password.isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('请输入密钥库密码')),
+                );
+                return;
+              }
+              
+              // 调用密钥库生成
+              final result = await SigningManager.generateKeystore(
+                keystorePath: keystorePath,
+                keystorePassword: password,
+                keyAlias: alias,
+                keyPassword: keyPassword.isEmpty ? password : keyPassword,
+                commonName: 'Miss IDE',
+                organization: 'Miss IDE',
+                locality: 'Beijing',
+                state: 'Beijing',
+                country: 'CN',
               );
+              
+              if (result != null) {
+                // 检查是否是命令行提示（keytool 不可用）
+                if (result.startsWith('密钥库生成命令') || result.contains('keytool')) {
+                  // 显示命令行供用户手动执行
+                  _showKeystoreCommandDialog(result);
+                } else {
+                  // 密钥库生成成功
+                  _updateSigningConfig(SigningConfig(
+                    keystorePath: keystorePath,
+                    keystorePassword: password,
+                    keyAlias: alias,
+                    keyPassword: keyPassword.isEmpty ? password : keyPassword,
+                  ));
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('密钥库已生成: ${keystoreController.text}')),
+                  );
+                }
+              } else {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('密钥库生成失败，请检查权限和路径')),
+                );
+              }
             },
             child: const Text('生成'),
           ),
@@ -828,6 +877,66 @@ class _BuildPageState extends ConsumerState<BuildPage> {
     final config = ref.read(buildConfigProvider);
     ref.read(buildConfigProvider.notifier).state = 
         config.copyWith(signingConfig: signingConfig);
+  }
+
+  /// 显示密钥库生成命令对话框（当 keytool 不可用时）
+  void _showKeystoreCommandDialog(String command) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.terminal, color: Colors.orange),
+            SizedBox(width: 8),
+            Text('请在电脑上执行'),
+          ],
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                '手机上无法直接生成密钥库，请在电脑终端执行以下命令：',
+                style: TextStyle(fontSize: 12),
+              ),
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade200,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: SelectableText(
+                  command,
+                  style: const TextStyle(fontFamily: 'monospace', fontSize: 11),
+                ),
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                '提示：需要安装 Java JDK，keytool 是 JDK 自带工具',
+                style: TextStyle(fontSize: 10, color: Colors.grey),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: command));
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('命令已复制到剪贴板')),
+              );
+            },
+            child: const Text('复制命令'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('关闭'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _startBuild(BuildConfig config) async {

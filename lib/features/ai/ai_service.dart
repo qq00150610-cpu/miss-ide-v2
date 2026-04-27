@@ -692,7 +692,32 @@ $code
       return response;
     } catch (e) {
       debugPrint('Chat error: $e');
-      return '请求失败: $e\n\n请检查API Key是否正确';
+      final errorStr = e.toString().toLowerCase();
+      
+      // 区分不同类型的错误，提供更准确的提示
+      if (errorStr.contains('socketexception') || 
+          errorStr.contains('failed host lookup') ||
+          errorStr.contains('no address associated with hostname')) {
+        return '网络连接失败: 无法解析服务器域名\n\n'
+            '可能原因:\n'
+            '1. 网络不稳定或断开\n'
+            '2. DNS解析失败，请尝试切换网络\n'
+            '3. 如果使用VPN/代理，请检查设置\n\n'
+            '错误详情: $e';
+      } else if (errorStr.contains('timed out') || errorStr.contains('timeout')) {
+        return '请求超时: 服务器响应时间过长\n\n'
+            '请检查网络连接后重试';
+      } else if (errorStr.contains('connection refused') || 
+                 errorStr.contains('connection failed')) {
+        return '连接被拒绝: 无法连接到服务器\n\n'
+            '请检查网络连接';
+      } else if (errorStr.contains('401') || errorStr.contains('unauthorized')) {
+        return 'API Key 认证失败\n\n'
+            '请检查 API Key 是否正确，或是否已过期';
+      } else {
+        return '请求失败: $e\n\n'
+            '请检查网络连接和 API Key 设置';
+      }
     }
   }
 

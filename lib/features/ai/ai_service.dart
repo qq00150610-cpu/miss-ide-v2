@@ -224,9 +224,9 @@ main();
     try {
       final prefs = await SharedPreferences.getInstance();
       _selectedModel = prefs.getString('ai_selected_model') ?? 'DeepSeek';
-      _apiKey = prefs.getString('ai_api_key_\$_selectedModel') ?? '';
+      _apiKey = prefs.getString('ai_api_key_$_selectedModel') ?? '';
     } catch (e) {
-      debugPrint('AI Service init error: \$e');
+      debugPrint('AI Service init error: $e');
     }
     _isInitialized = true;
   }
@@ -253,9 +253,9 @@ main();
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('ai_selected_model', modelName);
-      _apiKey = prefs.getString('ai_api_key_\$modelName') ?? '';
+      _apiKey = prefs.getString('ai_api_key_$modelName') ?? '';
     } catch (e) {
-      debugPrint('Set model error: \$e');
+      debugPrint('Set model error: $e');
     }
   }
 
@@ -264,11 +264,11 @@ main();
     try {
       _apiKey = apiKey.trim();
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('ai_api_key_\$_selectedModel', apiKey.trim());
-      debugPrint('API Key saved for \$_selectedModel');
+      await prefs.setString('ai_api_key_$_selectedModel', apiKey.trim());
+      debugPrint('API Key saved for $_selectedModel');
       return true;
     } catch (e) {
-      debugPrint('Failed to save API Key: \$e');
+      debugPrint('Failed to save API Key: $e');
       return false;
     }
   }
@@ -331,14 +331,14 @@ main();
   Future<String> createProject(String projectPath, String templateName) async {
     final template = _projectTemplates[templateName];
     if (template == null) {
-      return '未找到模板: \$templateName';
+      return '未找到模板: $templateName';
     }
     
     try {
       // 创建项目目录
       final dir = Directory(projectPath);
       if (await dir.exists()) {
-        return '目录已存在: \$projectPath';
+        return '目录已存在: $projectPath';
       }
       
       await dir.create(recursive: true);
@@ -354,9 +354,9 @@ main();
       // 回调通知
       onProjectCreated?.call(projectPath);
       
-      return '项目已创建: \$projectPath\n\n模板: \${template.name}\n文件数: \${template.files.length}';
+      return '项目已创建: $projectPath\n\n模板: ${template.name}\n文件数: ${template.files.length}';
     } catch (e) {
-      return '创建失败: \$e';
+      return '创建失败: $e';
     }
   }
 
@@ -370,7 +370,7 @@ main();
       // 向AI询问项目结构
       final prompt = '''请为以下项目生成代码结构：
       
-描述: \$description
+描述: $description
 
 请生成一个完整的项目结构，包括所有必要的文件。
 回复格式要求：
@@ -415,9 +415,9 @@ main();
       // 回调通知
       onProjectCreated?.call(projectPath);
       
-      return '项目已创建: \$projectPath\n\n共生成 \${matches.length} 个文件';
+      return '项目已创建: $projectPath\n\n共生成 ${matches.length} 个文件';
     } catch (e) {
-      return '生成失败: \$e';
+      return '生成失败: $e';
     }
   }
 
@@ -428,9 +428,9 @@ main();
     }
     
     try {
-      final prompt = '''请生成一段 \$language 代码：
+      final prompt = '''请生成一段 $language 代码：
 
-需求: \$description
+需求: $description
 
 请生成完整可用的代码，并简要说明使用方法。''';
       
@@ -443,7 +443,7 @@ main();
       
       return response;
     } catch (e) {
-      return '生成失败: \$e';
+      return '生成失败: $e';
     }
   }
 
@@ -457,7 +457,7 @@ main();
       final prompt = '''请解释以下代码的功能和工作原理：
 
 \`\`\`
-\$code
+$code
 \`\`\`
 
 请用简洁易懂的语言解释，包括：
@@ -467,7 +467,7 @@ main();
       
       return await chat(prompt);
     } catch (e) {
-      return '解释失败: \$e';
+      return '解释失败: $e';
     }
   }
 
@@ -479,11 +479,11 @@ main();
     }
 
     if (_apiKey.isEmpty && config.provider != 'ollama') {
-      return '请先在设置中配置 \${config.name} 的 API Key。\n\n获取地址：\${_getKeyUrl(config.name)}';
+      return '请先在设置中配置 ${config.name} 的 API Key。\n\n获取地址：${_getKeyUrl(config.name)}';
     }
 
     try {
-      debugPrint('Sending request to \${config.name}...');
+      debugPrint('Sending request to ${config.name}...');
       String response;
       
       switch (config.provider) {
@@ -515,8 +515,8 @@ main();
       debugPrint('Response received');
       return response;
     } catch (e) {
-      debugPrint('Chat error: \$e');
-      return '请求失败: \$e\n\n请检查API Key是否正确';
+      debugPrint('Chat error: $e');
+      return '请求失败: $e\n\n请检查API Key是否正确';
     }
   }
 
@@ -550,7 +550,7 @@ main();
       Uri.parse(config.apiEndpoint),
       headers: {
         'Content-Type': 'application/json; charset=utf-8',
-        'Authorization': 'Bearer \$_apiKey',
+        'Authorization': 'Bearer $_apiKey',
       },
       body: utf8.encode(jsonEncode({
         'model': config.modelId,
@@ -560,7 +560,7 @@ main();
       })),
     );
 
-    debugPrint('DeepSeek response status: \${response.statusCode}');
+    debugPrint('DeepSeek response status: ${response.statusCode}');
     
     if (response.statusCode == 200) {
       final body = utf8.decode(response.bodyBytes);
@@ -568,7 +568,7 @@ main();
       return data['choices'][0]['message']['content'] ?? '无响应内容';
     } else {
       final body = utf8.decode(response.bodyBytes);
-      return 'API错误 (\${response.statusCode}): \$body';
+      return 'API错误 (${response.statusCode}): $body';
     }
   }
 
@@ -588,7 +588,7 @@ main();
       Uri.parse(config.apiEndpoint),
       headers: {
         'Content-Type': 'application/json; charset=utf-8',
-        'Authorization': 'Bearer \$_apiKey',
+        'Authorization': 'Bearer $_apiKey',
       },
       body: utf8.encode(jsonEncode({
         'model': config.modelId,
@@ -604,7 +604,7 @@ main();
       return data['choices'][0]['message']['content'] ?? '无响应内容';
     } else {
       final body = utf8.decode(response.bodyBytes);
-      return 'API错误 (\${response.statusCode}): \$body';
+      return 'API错误 (${response.statusCode}): $body';
     }
   }
 
@@ -618,7 +618,7 @@ main();
       Uri.parse(config.apiEndpoint),
       headers: {
         'Content-Type': 'application/json; charset=utf-8',
-        'Authorization': 'Bearer \$_apiKey',
+        'Authorization': 'Bearer $_apiKey',
       },
       body: utf8.encode(jsonEncode({
         'model': config.modelId,
@@ -639,10 +639,10 @@ main();
                data['output']['choices']?[0]?['message']?['content'] ?? 
                '无响应';
       }
-      return '响应格式错误: \$body';
+      return '响应格式错误: $body';
     } else {
       final body = utf8.decode(response.bodyBytes);
-      return 'API错误 (\${response.statusCode}): \$body';
+      return 'API错误 (${response.statusCode}): $body';
     }
   }
 
@@ -656,7 +656,7 @@ main();
       Uri.parse(config.apiEndpoint),
       headers: {
         'Content-Type': 'application/json; charset=utf-8',
-        'Authorization': 'Bearer \$_apiKey',
+        'Authorization': 'Bearer $_apiKey',
       },
       body: utf8.encode(jsonEncode({
         'model': config.modelId,
@@ -672,7 +672,7 @@ main();
       return data['choices'][0]['message']['content'] ?? '无响应';
     } else {
       final body = utf8.decode(response.bodyBytes);
-      return 'API错误 (\${response.statusCode}): \$body';
+      return 'API错误 (${response.statusCode}): $body';
     }
   }
 
@@ -682,7 +682,7 @@ main();
     String userMessage,
     List<AIMessage>? history,
   ) async {
-    final url = '\${config.apiEndpoint}?key=\$_apiKey';
+    final url = '${config.apiEndpoint}?key=$_apiKey';
     
     final response = await http.post(
       Uri.parse(url),
@@ -704,7 +704,7 @@ main();
       return data['candidates'][0]['content']['parts'][0]['text'] ?? '无响应';
     } else {
       final body = utf8.decode(response.bodyBytes);
-      return 'API错误 (\${response.statusCode}): \$body';
+      return 'API错误 (${response.statusCode}): $body';
     }
   }
 
@@ -736,7 +736,7 @@ main();
       return data['content'][0]['text'] ?? '无响应';
     } else {
       final body = utf8.decode(response.bodyBytes);
-      return 'API错误 (\${response.statusCode}): \$body';
+      return 'API错误 (${response.statusCode}): $body';
     }
   }
 

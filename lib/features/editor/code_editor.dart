@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:path/path.dart' as p;
+import '../file_manager/project_directory.dart';
 
 /// 编辑器标签
 class EditorTab {
@@ -39,11 +40,13 @@ class CodeLanguage {
 class CodeEditorPage extends StatefulWidget {
   final String? filePath;
   final String? initialContent;
+  final String? projectPath; // 项目根目录路径
   
   const CodeEditorPage({
     super.key, 
     this.filePath,
     this.initialContent,
+    this.projectPath,
   });
 
   @override
@@ -58,6 +61,10 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
   String _currentFilePath = '';
   String _currentLanguage = 'Text';
   final ScrollController _scrollController = ScrollController();
+  
+  // 目录侧边栏状态
+  bool _isDirectoryExpanded = false;
+  String? _currentProjectPath;
   
   /// 支持的编程语言
   static const Map<String, CodeLanguage> _languages = {
@@ -305,11 +312,16 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
   @override
   void initState() {
     super.initState();
+    _currentProjectPath = widget.projectPath;
     if (widget.initialContent != null) {
       _controller.text = widget.initialContent!;
     }
     if (widget.filePath != null) {
       _loadFile(widget.filePath!);
+      // 如果文件路径在某个项目中，自动设置项目路径
+      if (_currentProjectPath == null) {
+        _currentProjectPath = p.dirname(widget.filePath!);
+      }
     }
   }
 
@@ -325,6 +337,24 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
     return Scaffold(
       appBar: AppBar(
         title: Text(_tabs.isEmpty ? '代码编辑器' : _tabs[_currentTabIndex].fileName),
+        leading: Row(
+          children: [
+            // 目录展开/收起按钮
+            if (_currentProjectPath != null)
+              IconButton(
+                icon: Icon(
+                  _isDirectoryExpanded ? Icons.menu_open : Icons.menu,
+                  color: _isDirectoryExpanded ? Theme.of(context).colorScheme.primary : null,
+                ),
+                onPressed: () {
+                  setState(() {
+                    _isDirectoryExpanded = !_isDirectoryExpanded;
+                  });
+                },
+                tooltip: _isDirectoryExpanded ? '收起目录' : '展开目录',
+              ),
+          ],
+        ),
         actions: [
           IconButton(
             icon: Icon(Icons.save, color: _hasChanges ? Colors.orange : null),
@@ -366,78 +396,100 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
           ),
         ],
       ),
-      body: Column(
+      body: Row(
         children: [
-          // 文件标签栏
-          if (_tabs.isNotEmpty)
-            Container(
-              height: 36,
-              color: Theme.of(context).colorScheme.surfaceVariant,
-              child: Row(
-                children: [
-                  Expanded(
-                    child: ListView.builder(
-                      scrollDirection: Axis.horizontal,
-                      itemCount: _tabs.length,
-                      itemBuilder: (context, index) {
-                        final tab = _tabs[index];
-                        final isActive = index == _currentTabIndex;
-                        return GestureDetector(
-                          onTap: () => _switchTab(index),
-                          onLongPress: () => _showTabMenu(index),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                            decoration: BoxDecoration(
-                              color: isActive 
-                                ? Theme.of(context).colorScheme.surface
-                                : Colors.transparent,
-                              border: Border(
-                                bottom: BorderSide(
-                                  color: isActive 
-                                    ? Theme.of(context).colorScheme.primary
-                                    : Colors.transparent,
-                                  width: 2,
-                                ),
-                              ),
-                            ),
-                            child: Row(
-                              children: [
-                                Icon(
-                                  _getFileIcon(tab.fileName),
-                                  size: 14,
-                                  color: _getFileColor(tab.fileName),
-                                ),
-                                const SizedBox(width: 6),
-                                Text(
-                                  tab.fileName,
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    color: tab.hasChanges ? Colors.orange : null,
+          // 左侧项目目录
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            width: _isDirectoryExpanded && _currentProjectPath != null ? 220 : 0,
+            child: _isDirectoryExpanded && _currentProjectPath != null
+                ? ProjectDirectoryPanel(
+                    projectPath: _currentProjectPath!,
+                    onFileSelected: _onFileSelectedFromDirectory,
+                    isExpanded: _isDirectoryExpanded,
+                    onToggle: () {
+                      setState(() {
+                        _isDirectoryExpanded = !_isDirectoryExpanded;
+                      });
+                    },
+                  )
+                : const SizedBox.shrink(),
+          ),
+          
+          // 右侧编辑区
+          Expanded(
+            child: Column(
+              children: [
+                // 文件标签栏
+                if (_tabs.isNotEmpty)
+                  Container(
+                    height: 36,
+                    color: Theme.of(context).colorScheme.surfaceVariant,
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: ListView.builder(
+                            scrollDirection: Axis.horizontal,
+                            itemCount: _tabs.length,
+                            itemBuilder: (context, index) {
+                              final tab = _tabs[index];
+                              final isActive = index == _currentTabIndex;
+                              return GestureDetector(
+                                onTap: () => _switchTab(index),
+                                onLongPress: () => _showTabMenu(index),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                  decoration: BoxDecoration(
+                                    color: isActive 
+                                      ? Theme.of(context).colorScheme.surface
+                                      : Colors.transparent,
+                                    border: Border(
+                                      bottom: BorderSide(
+                                        color: isActive 
+                                          ? Theme.of(context).colorScheme.primary
+                                          : Colors.transparent,
+                                        width: 2,
+                                      ),
+                                    ),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Icon(
+                                        _getFileIcon(tab.fileName),
+                                        size: 14,
+                                        color: _getFileColor(tab.fileName),
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Text(
+                                        tab.fileName,
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: tab.hasChanges ? Colors.orange : null,
+                                        ),
+                                      ),
+                                      if (tab.hasChanges) ...[
+                                        const SizedBox(width: 4),
+                                        const Text('●', style: TextStyle(color: Colors.orange, fontSize: 8)),
+                                      ],
+                                      const SizedBox(width: 4),
+                                      InkWell(
+                                        onTap: () => _closeTab(index),
+                                        child: Icon(
+                                          Icons.close,
+                                          size: 14,
+                                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                        ),
+                                      ),
+                                    ],
                                   ),
                                 ),
-                                if (tab.hasChanges) ...[
-                                  const SizedBox(width: 4),
-                                  const Text('●', style: TextStyle(color: Colors.orange, fontSize: 8)),
-                                ],
-                                const SizedBox(width: 4),
-                                InkWell(
-                                  onTap: () => _closeTab(index),
-                                  child: Icon(
-                                    Icons.close,
-                                    size: 14,
-                                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                                  ),
-                                ),
-                              ],
-                            ),
+                              );
+                            },
                           ),
-                        );
-                      },
+                        ),
+                      ],
                     ),
                   ),
-                ],
-              ),
-            ),
           
           // 工具栏
           Container(
@@ -666,6 +718,17 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
         ],
       ),
     );
+  }
+
+  // 从目录面板选择文件的回调
+  void _onFileSelectedFromDirectory(String filePath) {
+    _loadFile(filePath);
+    // 自动展开目录侧边栏
+    if (!_isDirectoryExpanded) {
+      setState(() {
+        _isDirectoryExpanded = true;
+      });
+    }
   }
 
   Widget _buildLanguageChip(String name, Color color) {

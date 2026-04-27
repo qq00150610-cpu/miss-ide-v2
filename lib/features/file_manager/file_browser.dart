@@ -5,6 +5,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:path/path.dart' as p;
 import 'package:archive/archive.dart';
+import 'project_directory.dart';
 
 /// 项目类型
 enum ProjectType {
@@ -532,7 +533,19 @@ class _FileBrowserPageState extends State<FileBrowserPage> {
         _isExtracting = false;
       });
       
-      _showSuccess('已解压到: $fileName\n格式: $archiveType');
+      // 显示文件树对话框
+      if (mounted) {
+        showDialog(
+          context: context,
+          builder: (context) => FileTreeDialog(
+            projectPath: outputPath,
+            projectName: fileName,
+          ),
+        );
+      }
+      
+      // 直接打开项目
+      _openProject(project);
       
     } catch (e) {
       setState(() {
@@ -543,9 +556,63 @@ class _FileBrowserPageState extends State<FileBrowserPage> {
   }
 
   Future<void> _importProject() async {
+    // 显示导入方式选择对话框
+    final result = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.archive, color: Colors.blue),
+            SizedBox(width: 8),
+            Text('导入项目'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('请选择导入方式：'),
+            const SizedBox(height: 16),
+            _ImportOptionCard(
+              icon: Icons.folder_open,
+              title: '选择目录',
+              description: '直接选择一个项目文件夹',
+              color: Colors.blue,
+              onTap: () => Navigator.pop(context, 'directory'),
+            ),
+            const SizedBox(height: 12),
+            _ImportOptionCard(
+              icon: Icons.archive,
+              title: '导入压缩包',
+              description: '支持 ZIP/RAR/TAR.GZ/7Z 等格式',
+              color: Colors.purple,
+              onTap: () => Navigator.pop(context, 'archive'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('取消'),
+          ),
+        ],
+      ),
+    );
+
+    if (result == null) return;
+
+    if (result == 'directory') {
+      await _importFromDirectory();
+    } else if (result == 'archive') {
+      await _importFromArchive();
+    }
+  }
+
+  /// 从目录导入
+  Future<void> _importFromDirectory() async {
     try {
-      // 选择目录
-      String? selectedDirectory = await FilePicker.platform.getDirectoryPath();
+      String? selectedDirectory = await FilePicker.platform.getDirectoryPath(
+        dialogTitle: '选择项目目录',
+      );
       if (selectedDirectory == null) return;
 
       final dir = Directory(selectedDirectory);
@@ -566,7 +633,6 @@ class _FileBrowserPageState extends State<FileBrowserPage> {
       );
 
       setState(() {
-        // 避免重复
         _recentProjects.removeWhere((p) => p.path == selectedDirectory);
         _recentProjects.insert(0, project);
       });
@@ -574,8 +640,47 @@ class _FileBrowserPageState extends State<FileBrowserPage> {
       await _saveProjects();
       _showSuccess('项目已导入: $projectName');
       
+      // 显示文件树
+      if (mounted) {
+        showDialog(
+          context: context,
+          builder: (context) => FileTreeDialog(
+            projectPath: selectedDirectory,
+            projectName: projectName,
+          ),
+        );
+      }
+      
       // 直接打开项目
       _openProject(project);
+    } catch (e) {
+      _showError('导入失败: $e');
+    }
+  }
+
+  /// 从压缩包导入
+  Future<void> _importFromArchive() async {
+    try {
+      FilePickerResult? result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['zip', 'rar', 'tar', 'gz', 'tgz', '7z'],
+        dialogTitle: '选择压缩包文件',
+      );
+      
+      if (result == null || result.files.isEmpty) return;
+      
+      final filePath = result.files.first.path;
+      if (filePath == null) return;
+      
+      // 选择解压目录
+      String? selectedDirectory = await FilePicker.platform.getDirectoryPath(
+        dialogTitle: '选择解压目录',
+      );
+      
+      if (selectedDirectory == null) return;
+      
+      await _extractArchive(filePath, selectedDirectory);
+      
     } catch (e) {
       _showError('导入失败: $e');
     }
@@ -1047,6 +1152,83 @@ main();
         content: Text(message),
         backgroundColor: Colors.red,
         behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+}
+
+/// 导入选项卡片组件
+class _ImportOptionCard extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String description;
+  final Color color;
+  final VoidCallback onTap;
+
+  const _ImportOptionCard({
+    required this.icon,
+    required this.title,
+    required this.description,
+    required this.color,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          border: Border.all(
+            color: color.withOpacity(0.3),
+            width: 1.5,
+          ),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                color: color.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(icon, color: color, size: 28),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      color: Theme.of(context).colorScheme.onSurface,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    description,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Icon(
+              Icons.arrow_forward_ios,
+              size: 16,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+          ],
+        ),
       ),
     );
   }

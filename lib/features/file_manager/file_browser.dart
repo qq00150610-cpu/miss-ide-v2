@@ -1,294 +1,269 @@
-import 'dart:io';
-import 'package:path/path.dart' as path;
-import '../../utils/constants.dart';
-import '../../utils/logger.dart';
-import 'file_operations.dart';
+import 'package:flutter/material.dart';
 
-/// 文件浏览器
-class FileBrowser {
-  static final FileBrowser _instance = FileBrowser._internal();
-  factory FileBrowser() => _instance;
-  FileBrowser._internal();
+class FileBrowserPage extends StatefulWidget {
+  const FileBrowserPage({super.key});
 
-  final FileOperations _fileOps = fileOperations;
-  String? _currentPath;
-  List<FileNode> _nodes = [];
-  final List<String> _pathHistory = [];
-  int _historyIndex = -1;
+  @override
+  State<FileBrowserPage> createState() => _FileBrowserPageState();
+}
 
-  /// 当前路径
-  String? get currentPath => _currentPath;
+class _FileBrowserPageState extends State<FileBrowserPage> {
+  final List<ProjectItem> _recentProjects = [
+    ProjectItem(
+      name: 'my_app',
+      path: '/storage/emulated/0/Projects/my_app',
+      type: ProjectType.flutter,
+      lastModified: '2024-04-26',
+    ),
+    ProjectItem(
+      name: 'example_android',
+      path: '/storage/emulated/0/Projects/example_android',
+      type: ProjectType.android,
+      lastModified: '2024-04-25',
+    ),
+    ProjectItem(
+      name: 'kotlin_demo',
+      path: '/storage/emulated/0/Projects/kotlin_demo',
+      type: ProjectType.kotlin,
+      lastModified: '2024-04-20',
+    ),
+  ];
 
-  /// 文件节点列表
-  List<FileNode> get nodes => List.unmodifiable(_nodes);
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Miss IDE'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.search),
+            onPressed: () {},
+          ),
+          IconButton(
+            icon: const Icon(Icons.more_vert),
+            onPressed: () {},
+          ),
+        ],
+      ),
+      body: Column(
+        children: [
+          // 快捷操作
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              children: [
+                _buildQuickAction(Icons.create_new_folder, '导入项目', Colors.blue),
+                const SizedBox(width: 12),
+                _buildQuickAction(Icons.add, '新建项目', Colors.green),
+                const SizedBox(width: 12),
+                _buildQuickAction(Icons.download, '克隆仓库', Colors.orange),
+              ],
+            ),
+          ),
+          
+          // 最近项目
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Row(
+              children: [
+                Text(
+                  '最近项目',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                const Spacer(),
+                TextButton(
+                  onPressed: () {},
+                  child: const Text('查看全部'),
+                ),
+              ],
+            ),
+          ),
+          
+          // 项目列表
+          Expanded(
+            child: _recentProjects.isEmpty
+                ? const Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.folder_open, size: 64, color: Colors.grey),
+                        SizedBox(height: 16),
+                        Text('暂无项目'),
+                        SizedBox(height: 8),
+                        Text('点击上方按钮创建或导入项目'),
+                      ],
+                    ),
+                  )
+                : ListView.builder(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    itemCount: _recentProjects.length,
+                    itemBuilder: (context, index) {
+                      return _buildProjectCard(_recentProjects[index]);
+                    },
+                  ),
+          ),
+        ],
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () => _showNewProjectDialog(),
+        icon: const Icon(Icons.add),
+        label: const Text('新建项目'),
+      ),
+    );
+  }
 
-  /// 是否有后退历史
-  bool get canGoBack => _historyIndex > 0;
+  Widget _buildQuickAction(IconData icon, String label, Color color) {
+    return Expanded(
+      child: InkWell(
+        onTap: () {},
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          decoration: BoxDecoration(
+            color: color.withOpacity(0.1),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Column(
+            children: [
+              Icon(icon, color: color),
+              const SizedBox(height: 4),
+              Text(
+                label,
+                style: TextStyle(fontSize: 12, color: color),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 
-  /// 是否有前进历史
-  bool get canGoForward => _historyIndex < _pathHistory.length - 1;
+  Widget _buildProjectCard(ProjectItem project) {
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      child: ListTile(
+        leading: Container(
+          width: 40,
+          height: 40,
+          decoration: BoxDecoration(
+            color: _getProjectColor(project.type).withOpacity(0.2),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Icon(
+            _getProjectIcon(project.type),
+            color: _getProjectColor(project.type),
+          ),
+        ),
+        title: Text(project.name),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              project.path,
+              style: TextStyle(
+                fontSize: 12,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+            Text(
+              project.type.name.toUpperCase(),
+              style: TextStyle(
+                fontSize: 10,
+                color: _getProjectColor(project.type),
+              ),
+            ),
+          ],
+        ),
+        isThreeLine: true,
+        trailing: PopupMenuButton<String>(
+          onSelected: (value) {
+            if (value == 'delete') {
+              setState(() {
+                _recentProjects.remove(project);
+              });
+            }
+          },
+          itemBuilder: (context) => [
+            const PopupMenuItem(value: 'open', child: Text('打开')),
+            const PopupMenuItem(value: 'terminal', child: Text('终端')),
+            const PopupMenuItem(value: 'delete', child: Text('删除')),
+          ],
+        ),
+        onTap: () {
+          // 打开项目
+        },
+      ),
+    );
+  }
 
-  /// 打开目录
-  Future<List<FileNode>> openDirectory(String dirPath) async {
-    _currentPath = dirPath;
-    
-    // 添加到历史
-    if (_historyIndex < _pathHistory.length - 1) {
-      // 如果在历史中间，清除后面的历史
-      _pathHistory.removeRange(_historyIndex + 1, _pathHistory.length);
+  IconData _getProjectIcon(ProjectType type) {
+    switch (type) {
+      case ProjectType.flutter:
+        return Icons.flutter_dash;
+      case ProjectType.android:
+        return Icons.android;
+      case ProjectType.kotlin:
+        return Icons.code;
+      case ProjectType.java:
+        return Icons.coffee;
     }
-    _pathHistory.add(dirPath);
-    _historyIndex = _pathHistory.length - 1;
+  }
 
-    try {
-      final entities = await _fileOps.listDirectory(dirPath);
-      _nodes = await _buildFileTree(entities, dirPath);
-      
-      // 排序：目录在前，文件在后，按名称排序
-      _nodes.sort((a, b) {
-        if (a.isDirectory && !b.isDirectory) return -1;
-        if (!a.isDirectory && b.isDirectory) return 1;
-        return a.name.toLowerCase().compareTo(b.name.toLowerCase());
-      });
-
-      logger.i(LogTags.fileManager, 'Opened directory: $dirPath (${_nodes.length} items)');
-      return _nodes;
-    } catch (e) {
-      logger.e(LogTags.fileManager, 'Failed to open directory: $dirPath', error: e);
-      _nodes = [];
-      return [];
+  Color _getProjectColor(ProjectType type) {
+    switch (type) {
+      case ProjectType.flutter:
+        return Colors.blue;
+      case ProjectType.android:
+        return Colors.green;
+      case ProjectType.kotlin:
+        return Colors.purple;
+      case ProjectType.java:
+        return Colors.orange;
     }
   }
 
-  /// 后退
-  Future<List<FileNode>?> goBack() async {
-    if (!canGoBack) return null;
-    _historyIndex--;
-    return openDirectory(_pathHistory[_historyIndex]);
-  }
-
-  /// 前进
-  Future<List<FileNode>?> goForward() async {
-    if (!canGoForward) return null;
-    _historyIndex++;
-    return openDirectory(_pathHistory[_historyIndex]);
-  }
-
-  /// 返回上级目录
-  Future<List<FileNode>?> goUp() async {
-    if (_currentPath == null) return null;
-    
-    final parent = Directory(_currentPath!).parent.path;
-    if (parent == _currentPath) return null; // 已经是最顶层
-    
-    return openDirectory(parent);
-  }
-
-  /// 刷新当前目录
-  Future<List<FileNode>> refresh() async {
-    if (_currentPath == null) return [];
-    return openDirectory(_currentPath!);
-  }
-
-  /// 构建文件树
-  Future<List<FileNode>> _buildFileTree(List<FileSystemEntity> entities, String basePath) async {
-    final nodes = <FileNode>[];
-    
-    for (final entity in entities) {
-      final name = path.basename(entity.path);
-      
-      // 跳过隐藏文件（除非是配置目录）
-      if (name.startsWith('.') && !_isImportantHiddenDir(name)) {
-        continue;
-      }
-
-      final stat = await entity.stat();
-      final language = ProgrammingLanguage.fromFileName(name);
-      
-      nodes.add(FileNode(
-        path: entity.path,
-        name: name,
-        isDirectory: entity is Directory,
-        size: stat.size,
-        modifiedAt: stat.modified,
-        language: language,
-      ));
-    }
-
-    return nodes;
-  }
-
-  /// 是否是重要的隐藏目录
-  bool _isImportantHiddenDir(String name) {
-    const importantDirs = ['.git', '.idea', '.vscode', '.dart_tool', '.gradle'];
-    return importantDirs.contains(name);
-  }
-
-  /// 获取目录树（用于侧边栏显示）
-  Future<FileTreeNode?> getDirectoryTree(String rootPath, {int maxDepth = 3}) async {
-    return _buildTreeNode(rootPath, 0, maxDepth);
-  }
-
-  Future<FileTreeNode?> _buildTreeNode(String nodePath, int depth, int maxDepth) async {
-    try {
-      final stat = await FileStat.stat(nodePath);
-      final name = path.basename(nodePath);
-      
-      if (stat.type == FileSystemEntityType.file) {
-        return FileTreeNode(
-          path: nodePath,
-          name: name,
-          isDirectory: false,
-          children: const [],
-        );
-      }
-
-      if (depth >= maxDepth) {
-        return FileTreeNode(
-          path: nodePath,
-          name: name,
-          isDirectory: true,
-          children: const [],
-          hasMore: true,
-        );
-      }
-
-      final dir = Directory(nodePath);
-      final children = <FileTreeNode>[];
-      
-      await for (final entity in dir.list()) {
-        final entityName = path.basename(entity.path);
-        
-        // 跳过隐藏文件
-        if (entityName.startsWith('.')) continue;
-        
-        final childNode = await _buildTreeNode(entity.path, depth + 1, maxDepth);
-        if (childNode != null) {
-          children.add(childNode);
-        }
-      }
-
-      // 排序
-      children.sort((a, b) {
-        if (a.isDirectory && !b.isDirectory) return -1;
-        if (!a.isDirectory && b.isDirectory) return 1;
-        return a.name.toLowerCase().compareTo(b.name.toLowerCase());
-      });
-
-      return FileTreeNode(
-        path: nodePath,
-        name: name,
-        isDirectory: true,
-        children: children,
-      );
-    } catch (e) {
-      return null;
-    }
-  }
-
-  /// 获取路径面包屑
-  List<PathCrumb> getPathBreadcrumbs() {
-    if (_currentPath == null) return [];
-    
-    final parts = _currentPath!.split('/');
-    final crumbs = <PathCrumb>[];
-    var currentPath = '';
-    
-    for (var i = 0; i < parts.length; i++) {
-      if (parts[i].isEmpty) continue;
-      currentPath = '$currentPath/${parts[i]}';
-      crumbs.add(PathCrumb(
-        path: currentPath,
-        name: parts[i],
-        isLast: i == parts.length - 1,
-      ));
-    }
-    
-    return crumbs;
+  void _showNewProjectDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('新建项目'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.flutter_dash, color: Colors.blue),
+              title: const Text('Flutter 项目'),
+              onTap: () => Navigator.pop(context),
+            ),
+            ListTile(
+              leading: const Icon(Icons.android, color: Colors.green),
+              title: const Text('Android 项目'),
+              onTap: () => Navigator.pop(context),
+            ),
+            ListTile(
+              leading: const Icon(Icons.code, color: Colors.purple),
+              title: const Text('Kotlin 项目'),
+              onTap: () => Navigator.pop(context),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 
-/// 文件节点
-class FileNode {
-  final String path;
+enum ProjectType { flutter, android, kotlin, java }
+
+class ProjectItem {
   final String name;
-  final bool isDirectory;
-  final int? size;
-  final DateTime? modifiedAt;
-  final ProgrammingLanguage? language;
-
-  const FileNode({
-    required this.path,
-    required this.name,
-    required this.isDirectory,
-    this.size,
-    this.modifiedAt,
-    this.language,
-  });
-
-  String get extension {
-    if (isDirectory) return '';
-    final parts = name.split('.');
-    return parts.length > 1 ? parts.last : '';
-  }
-
-  String get sizeDisplay {
-    if (size == null) return '';
-    if (size! < 1024) return '$size B';
-    if (size! < 1024 * 1024) return '${(size! / 1024).toStringAsFixed(1)} KB';
-    return '${(size! / 1024 / 1024).toStringAsFixed(1)} MB';
-  }
-
-  String get modifiedDisplay {
-    if (modifiedAt == null) return '';
-    final now = DateTime.now();
-    final diff = now.difference(modifiedAt!);
-    
-    if (diff.inDays > 365) {
-      return '${(diff.inDays / 365).floor()}年前';
-    } else if (diff.inDays > 30) {
-      return '${(diff.inDays / 30).floor()}月前';
-    } else if (diff.inDays > 0) {
-      return '${diff.inDays}天前';
-    } else if (diff.inHours > 0) {
-      return '${diff.inHours}小时前';
-    } else if (diff.inMinutes > 0) {
-      return '${diff.inMinutes}分钟前';
-    } else {
-      return '刚刚';
-    }
-  }
-}
-
-/// 文件树节点（用于侧边栏）
-class FileTreeNode {
   final String path;
-  final String name;
-  final bool isDirectory;
-  final List<FileTreeNode> children;
-  final bool hasMore;
+  final ProjectType type;
+  final String lastModified;
 
-  const FileTreeNode({
-    required this.path,
+  ProjectItem({
     required this.name,
-    required this.isDirectory,
-    required this.children,
-    this.hasMore = false,
+    required this.path,
+    required this.type,
+    required this.lastModified,
   });
 }
-
-/// 路径面包屑
-class PathCrumb {
-  final String path;
-  final String name;
-  final bool isLast;
-
-  const PathCrumb({
-    required this.path,
-    required this.name,
-    required this.isLast,
-  });
-}
-
-/// 全局实例
-final fileBrowser = FileBrowser();

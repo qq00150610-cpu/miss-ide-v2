@@ -122,7 +122,7 @@ class _BuildProgressWidgetState extends State<BuildProgressWidget> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerHighest,
+        color: colorScheme.surfaceVariant,
         borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
       ),
       child: Row(
@@ -395,7 +395,7 @@ class BuildHistoryListItem extends StatelessWidget {
   final VoidCallback? onTap;
   final VoidCallback? onDelete;
 
-  const BuildHistoryItem({
+  const BuildHistoryListItem({
     super.key,
     required this.item,
     this.onTap,

@@ -625,30 +625,6 @@ main();
     }
   }
 
-  /// 解释代码
-  Future<String> explainCode(String code) async {
-    if (!isConfigured) {
-      return '请先配置AI API Key';
-    }
-    
-    try {
-      final prompt = '''请解释以下代码的功能和工作原理：
-
-```
-$code
-```
-
-请用简洁易懂的语言解释，包括：
-1. 代码的主要功能
-2. 关键代码段的作用
-3. 代码的运行流程''';
-      
-      return await chat(prompt);
-    } catch (e) {
-      return '解释失败: $e';
-    }
-  }
-
   /// 发送消息并获取AI响应
   Future<String> chat(String userMessage, {List<AIMessage>? history}) async {
     final config = _models[_selectedModel];

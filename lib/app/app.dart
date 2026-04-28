@@ -5,6 +5,7 @@ import 'package:miss_ide/features/editor/code_editor.dart';
 import 'package:miss_ide/features/ai/ai_chat.dart';
 import 'package:miss_ide/features/settings/settings_page.dart';
 import 'package:miss_ide/features/file_manager/file_browser.dart';
+import 'package:miss_ide/features/project/project_page.dart';
 import 'package:miss_ide/features/build/build.dart';
 
 class MissIDEApp extends StatelessWidget {
@@ -34,30 +35,22 @@ class MainPageState extends State<MainPage> {
   int _currentIndex = 0;
   String? _currentProjectPath;
   String? _currentProjectName;
-  
-  late final List<Widget> _pages;
-
-  @override
-  void initState() {
-    super.initState();
-    _pages = [
-      FileBrowserPage(onProjectSelected: _onProjectSelected),
-      CodeEditorPage(projectPath: _currentProjectPath),
-      const BuildPage(),
-      AIChatPage(projectPath: _currentProjectPath),  // 传递项目路径
-      const SettingsPage(),
-    ];
-  }
+  bool _showProjectDetail = false;
 
   void _onProjectSelected(String path, String name) {
     setState(() {
       _currentProjectPath = path;
       _currentProjectName = name;
+      _showProjectDetail = true; // 显示项目详情页面
       _currentIndex = 1; // 切换到编辑器页面
-      // 重建编辑器页面以更新项目路径
-      _pages[1] = CodeEditorPage(projectPath: path);
-      // 重建AI聊天页面以传递新的项目路径
-      _pages[3] = AIChatPage(projectPath: path);
+    });
+  }
+
+  /// 关闭项目详情，返回项目列表
+  void _closeProjectDetail() {
+    setState(() {
+      _showProjectDetail = false;
+      _currentIndex = 0; // 返回项目列表
     });
   }
 
@@ -66,13 +59,41 @@ class MainPageState extends State<MainPage> {
     return Scaffold(
       body: IndexedStack(
         index: _currentIndex,
-        children: _pages,
+        children: [
+          // 项目列表页面
+          FileBrowserPage(onProjectSelected: _onProjectSelected),
+          // 项目详情页面（文件/进程/历史）
+          if (_showProjectDetail && _currentProjectPath != null)
+            ProjectPage(
+              projectPath: _currentProjectPath!,
+              onFileSelected: (filePath) {
+                // 打开文件并切换到编辑器
+                setState(() {
+                  _showProjectDetail = false;
+                });
+                // 通知编辑器打开文件
+              },
+              onClose: _closeProjectDetail,
+            )
+          else if (_currentProjectPath != null)
+            CodeEditorPage(projectPath: _currentProjectPath)
+          else
+            const CodeEditorPage(),
+          // 其他页面保持不变
+          const BuildPage(),
+          AIChatPage(projectPath: _currentProjectPath),
+          const SettingsPage(),
+        ],
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _currentIndex,
         onDestinationSelected: (index) {
           setState(() {
             _currentIndex = index;
+            // 如果切换到编辑页面且有项目，显示项目详情
+            if (index == 1 && _currentProjectPath != null) {
+              _showProjectDetail = true;
+            }
           });
         },
         destinations: const [

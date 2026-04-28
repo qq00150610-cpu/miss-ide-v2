@@ -699,26 +699,75 @@ $code
       // 区分不同类型的错误，提供更准确的提示
       if (errorStr.contains('socketexception') || 
           errorStr.contains('failed host lookup') ||
-          errorStr.contains('no address associated with hostname')) {
-        return '网络连接失败: 无法解析服务器域名\n\n'
+          errorStr.contains('no address associated with hostname') ||
+          errorStr.contains('dns') ||
+          errorStr.contains('lookup failed')) {
+        return '⚠️ 网络DNS解析失败\n\n'
+            '无法连接到 ${config.name} 的服务器\n\n'
             '可能原因:\n'
-            '1. 网络不稳定或断开\n'
-            '2. DNS解析失败，请尝试切换网络\n'
+            '1. 网络DNS服务器无法解析域名\n'
+            '2. 当前网络存在限制或阻断\n'
             '3. 如果使用VPN/代理，请检查设置\n\n'
+            '💡 建议:\n'
+            '• 切换到手机数据或其他WiFi网络\n'
+            '• 尝试使用其他模型（DeepSeek、Qwen、Kimi等）\n'
+            '• 联系网络管理员解除限制\n\n'
             '错误详情: $e';
       } else if (errorStr.contains('timed out') || errorStr.contains('timeout')) {
-        return '请求超时: 服务器响应时间过长\n\n'
-            '请检查网络连接后重试';
+        return '⏱️ 请求超时\n\n'
+            '服务器响应时间过长\n\n'
+            '可能原因:\n'
+            '1. 网络连接不稳定\n'
+            '2. 服务器负载过高\n'
+            '3. 网络环境较差\n\n'
+            '💡 建议:\n'
+            '• 检查网络连接后重试\n'
+            '• 稍后再试\n'
+            '• 尝试使用其他模型';
       } else if (errorStr.contains('connection refused') || 
-                 errorStr.contains('connection failed')) {
-        return '连接被拒绝: 无法连接到服务器\n\n'
-            '请检查网络连接';
-      } else if (errorStr.contains('401') || errorStr.contains('unauthorized')) {
-        return 'API Key 认证失败\n\n'
-            '请检查 API Key 是否正确，或是否已过期';
+                 errorStr.contains('connection failed') ||
+                 errorStr.contains('connection error')) {
+        return '🔌 连接失败\n\n'
+            '无法连接到服务器\n\n'
+            '可能原因:\n'
+            '1. 网络环境受限\n'
+            '2. 服务器暂时不可用\n'
+            '3. 防火墙或代理阻止了请求\n\n'
+            '💡 建议:\n'
+            '• 检查网络设置\n'
+            '• 尝试使用其他模型（DeepSeek、Qwen等）';
+      } else if (errorStr.contains('401') || 
+                 errorStr.contains('unauthorized') ||
+                 errorStr.contains('invalid api key')) {
+        return '🔑 API Key 认证失败\n\n'
+            '请检查 API Key 是否正确配置\n\n'
+            '可能原因:\n'
+            '1. API Key 填写错误\n'
+            '2. API Key 已过期或被禁用\n'
+            '3. 账户余额不足\n\n'
+            '💡 建议:\n'
+            '• 前往设置重新配置 API Key\n'
+            '• 确认 Key 没有多余空格\n'
+            '• 检查服务商账户状态\n\n'
+            '获取地址: ${_getKeyUrl(config.name)}';
+      } else if (errorStr.contains('403') || errorStr.contains('forbidden')) {
+        return '🚫 访问被拒绝\n\n'
+            '服务器拒绝了这个请求\n\n'
+            '可能原因:\n'
+            '1. 账户权限不足\n'
+            '2. 服务区域限制\n'
+            '3. API Key 没有该接口权限\n\n'
+            '💡 建议:\n'
+            '• 检查账户权限和余额\n'
+            '• 尝试使用其他模型';
       } else {
-        return '请求失败: $e\n\n'
-            '请检查网络连接和 API Key 设置';
+        return '❌ 请求失败\n\n'
+            '发生了未知错误\n\n'
+            '错误信息: $e\n\n'
+            '💡 建议:\n'
+            '• 检查网络连接\n'
+            '• 尝试使用其他模型（DeepSeek、Qwen、Kimi）\n'
+            '• 查看 API Key 设置是否正确';
       }
     }
   }

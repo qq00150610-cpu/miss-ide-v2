@@ -350,6 +350,12 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
     _isAutoSaving = false;
   }
 
+  int _getLineCount() {
+    final text = _controller.text;
+    if (text.isEmpty) return 1;
+    return text.split('\n').length;
+  }
+
   int _getCurrentLine() {
     final text = _controller.text;
     final cursorPos = _controller.selection.baseOffset;

@@ -30,6 +30,7 @@ dependencies:
   # 文件系统
   file_picker: ^6.1.1
   path: ^1.8.3
+  permission_handler: ^11.0.1
   
   # 代码高亮
   flutter_highlight: ^0.7.0

@@ -2,7 +2,9 @@ import 'dart:io';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:path/path.dart' as p;
 import 'package:miss_ide/features/file_manager/project_directory.dart';
+import 'package:miss_ide/features/editor/editor_settings.dart';
 
 class CodeEditorPage extends StatefulWidget {
   final String? filePath;
@@ -23,7 +25,6 @@ class CodeEditorPage extends StatefulWidget {
 class _CodeEditorPageState extends State<CodeEditorPage> {
   final TextEditingController _controller = TextEditingController();
   final ScrollController _scrollController = ScrollController();
-  final ScrollController _lineNumberScrollController = ScrollController();
   final List<EditorTab> _tabs = [];
   final FocusNode _editorFocusNode = FocusNode();
   int _currentTabIndex = 0;
@@ -36,6 +37,9 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
   // 自动保存相关
   Timer? _autoSaveTimer;
   bool _isAutoSaving = false;
+  
+  // 编辑器设置
+  EditorSettings _editorSettings = EditorSettings();
 
   @override
   void initState() {
@@ -47,14 +51,15 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
     if (widget.filePath != null) {
       _loadFile(widget.filePath!);
     }
-    // 同步行号和编辑器滚动
-    _scrollController.addListener(_syncLineNumberScroll);
+    // 加载编辑器设置
+    _loadEditorSettings();
   }
 
-  void _syncLineNumberScroll() {
-    if (_lineNumberScrollController.hasClients) {
-      _lineNumberScrollController.jumpTo(_scrollController.offset);
-    }
+  Future<void> _loadEditorSettings() async {
+    final settings = await EditorSettings.load();
+    setState(() {
+      _editorSettings = settings;
+    });
   }
 
   @override
@@ -62,7 +67,6 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
     _autoSaveTimer?.cancel();
     _controller.dispose();
     _scrollController.dispose();
-    _lineNumberScrollController.dispose();
     _editorFocusNode.dispose();
     super.dispose();
   }
@@ -84,6 +88,41 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
               )
             : null,
         actions: [
+          // 创建文件/文件夹按钮
+          if (_currentProjectPath != null)
+            PopupMenuButton<String>(
+              icon: const Icon(Icons.add_circle_outline),
+              tooltip: '创建',
+              onSelected: (value) {
+                if (value == 'file') {
+                  _showCreateFileDialog();
+                } else if (value == 'folder') {
+                  _showCreateFolderDialog();
+                }
+              },
+              itemBuilder: (context) => [
+                const PopupMenuItem(
+                  value: 'file',
+                  child: Row(
+                    children: [
+                      Icon(Icons.insert_drive_file, size: 20),
+                      SizedBox(width: 12),
+                      Text('创建文件'),
+                    ],
+                  ),
+                ),
+                const PopupMenuItem(
+                  value: 'folder',
+                  child: Row(
+                    children: [
+                      Icon(Icons.create_new_folder, size: 20),
+                      SizedBox(width: 12),
+                      Text('创建文件夹'),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           IconButton(
             icon: Icon(Icons.save, color: _hasChanges ? Colors.orange : null),
             onPressed: _saveCurrentFile,
@@ -98,6 +137,11 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
             icon: const Icon(Icons.add),
             onPressed: _newFile,
             tooltip: '新建文件',
+          ),
+          IconButton(
+            icon: const Icon(Icons.settings),
+            onPressed: _showEditorSettingsDialog,
+            tooltip: '编辑器设置',
           ),
           PopupMenuButton<String>(
             onSelected: _handleMenuAction,
@@ -174,6 +218,11 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
                                 ),
                                 if (tab.hasChanges)
                                   const Text(' ●', style: TextStyle(color: Colors.orange, fontSize: 8)),
+                                const SizedBox(width: 4),
+                                GestureDetector(
+                                  onTap: () => _closeTab(index),
+                                  child: const Icon(Icons.close, size: 14),
+                                ),
                               ],
                             ),
                           ),
@@ -233,71 +282,86 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
                             ],
                           ),
                         )
-                      : Row(
-                          children: [
-                            // 行号面板
-                            Container(
-                              width: 50,
-                              color: Theme.of(context).colorScheme.surfaceVariant,
-                              child: ListView.builder(
-                                controller: _lineNumberScrollController,
-                                physics: const BouncingScrollPhysics(),
-                                itemCount: _getLineCount(),
-                                itemBuilder: (context, index) {
-                                  return Container(
-                                    height: 21, // 匹配1.5倍行高(14px)
-                                    alignment: Alignment.centerRight,
-                                    padding: const EdgeInsets.only(right: 8),
-                                    child: Text(
-                                      '${index + 1}',
-                                      style: TextStyle(
-                                        fontFamily: 'monospace',
-                                        fontSize: 14,
-                                        height: 1.5,
-                                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                                      ),
-                                    ),
-                                  );
-                                },
-                              ),
-                            ),
-                            // 分隔线
-                            Container(
-                              width: 1,
-                              color: Theme.of(context).dividerColor,
-                            ),
-                            // 代码编辑区 - 支持横向滚动
-                            Expanded(
-                              child: SingleChildScrollView(
-                                controller: _scrollController,
-                                physics: const BouncingScrollPhysics(),
-                                child: SingleChildScrollView(
-                                  scrollDirection: Axis.horizontal,
-                                  physics: const BouncingScrollPhysics(),
-                                  child: SizedBox(
-                                    width: MediaQuery.of(context).size.width * 2, // 足够宽以支持长行
-                                    child: TextField(
-                                      controller: _controller,
-                                      focusNode: _editorFocusNode,
-                                      maxLines: null,
-                                      expands: false,
-                                      scrollPhysics: const BouncingScrollPhysics(),
-                                      style: const TextStyle(
-                                        fontFamily: 'monospace',
-                                        fontSize: 14,
-                                        height: 1.5,
-                                      ),
-                                      decoration: const InputDecoration(
-                                        border: InputBorder.none,
-                                        contentPadding: EdgeInsets.all(16),
-                                      ),
-                                      onChanged: (_) => _onContentChanged(),
+                      : Container(
+                          color: _editorSettings.backgroundColor,
+                          child: Row(
+                            children: [
+                              // 行号面板 - 修复对齐问题：使用与代码区相同的主滚动控制器
+                              if (_editorSettings.showLineNumbers)
+                                Container(
+                                  width: 50,
+                                  color: _editorSettings.backgroundColor.withOpacity(0.95),
+                                  child: NotificationListener<ScrollNotification>(
+                                    onNotification: (notification) {
+                                      // 同步滚动
+                                      if (!_scrollController.hasClients) return false;
+                                      if (notification is ScrollUpdateNotification) {
+                                        _scrollController.jumpTo(notification.metrics.pixels);
+                                      }
+                                      return false;
+                                    },
+                                    child: ListView.builder(
+                                      controller: _scrollController,
+                                      physics: const BouncingScrollPhysics(),
+                                      itemCount: _getLineCount(),
+                                      itemBuilder: (context, index) {
+                                        final lineHeight = _editorSettings.fontSize * _editorSettings.lineHeight;
+                                        return Container(
+                                          height: lineHeight,
+                                          alignment: Alignment.centerRight,
+                                          padding: const EdgeInsets.only(right: 8),
+                                          child: Text(
+                                            '${index + 1}',
+                                            style: TextStyle(
+                                              fontFamily: 'monospace',
+                                              fontSize: _editorSettings.fontSize,
+                                              height: _editorSettings.lineHeight,
+                                              color: _editorSettings.textColor.withOpacity(0.5),
+                                            ),
+                                          ),
+                                        );
+                                      },
                                     ),
                                   ),
                                 ),
+                              // 分隔线
+                              Container(
+                                width: 1,
+                                color: _editorSettings.textColor.withOpacity(0.2),
                               ),
-                            ),
-                          ],
+                              // 代码编辑区 - 修复编辑问题：确保可编辑
+                              Expanded(
+                                child: Container(
+                                  color: _editorSettings.backgroundColor,
+                                  child: TextField(
+                                    controller: _controller,
+                                    focusNode: _editorFocusNode,
+                                    autofocus: true,
+                                    enabled: true,
+                                    readOnly: false,
+                                    maxLines: null,
+                                    expands: false,
+                                    keyboardType: TextInputType.multiline,
+                                    textInputAction: TextInputAction.newline,
+                                    scrollPhysics: const BouncingScrollPhysics(),
+                                    style: TextStyle(
+                                      fontFamily: 'monospace',
+                                      fontSize: _editorSettings.fontSize,
+                                      height: _editorSettings.lineHeight,
+                                      color: _editorSettings.textColor,
+                                    ),
+                                    decoration: InputDecoration(
+                                      border: InputBorder.none,
+                                      contentPadding: const EdgeInsets.all(16),
+                                      fillColor: _editorSettings.backgroundColor,
+                                      filled: true,
+                                    ),
+                                    onChanged: (_) => _onContentChanged(),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                 ),
               ],
@@ -316,13 +380,15 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
       });
     }
     
-    // 10秒后自动保存
-    _autoSaveTimer?.cancel();
-    _autoSaveTimer = Timer(const Duration(seconds: 10), () {
-      if (_hasChanges && _tabs.isNotEmpty && _tabs[_currentTabIndex].path.isNotEmpty) {
-        _autoSave();
-      }
-    });
+    // 自动保存
+    if (_editorSettings.autoSave) {
+      _autoSaveTimer?.cancel();
+      _autoSaveTimer = Timer(Duration(seconds: _editorSettings.autoSaveDelay), () {
+        if (_hasChanges && _tabs.isNotEmpty && _tabs[_currentTabIndex].path.isNotEmpty) {
+          _autoSave();
+        }
+      });
+    }
   }
   
   Future<void> _autoSave() async {
@@ -549,28 +615,55 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
     }
   }
 
+  /// 新建文件 - 修复：添加自定义文件名输入框
   void _newFile() {
     showDialog(
       context: context,
       builder: (context) {
+        final TextEditingController nameController = TextEditingController();
         String selectedType = 'dart';
         return StatefulBuilder(
           builder: (context, setState) => AlertDialog(
             title: const Text('新建文件'),
-            content: DropdownButtonFormField<String>(
-              value: selectedType,
-              decoration: const InputDecoration(labelText: '文件类型'),
-              items: ['dart', 'java', 'kt', 'py', 'js', 'ts', 'html', 'css', 'json', 'yaml', 'md', 'txt']
-                  .map((type) => DropdownMenuItem(value: type, child: Text('.$type')))
-                  .toList(),
-              onChanged: (type) => setState(() => selectedType = type!),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // 文件名输入框
+                TextField(
+                  controller: nameController,
+                  decoration: const InputDecoration(
+                    labelText: '文件名',
+                    hintText: '输入文件名（不含扩展名）',
+                  ),
+                  autofocus: true,
+                ),
+                const SizedBox(height: 16),
+                // 文件类型下拉选择
+                DropdownButtonFormField<String>(
+                  value: selectedType,
+                  decoration: const InputDecoration(labelText: '文件类型'),
+                  items: [
+                    'dart', 'java', 'kt', 'py', 'js', 'ts', 
+                    'html', 'css', 'json', 'yaml', 'md', 'xml',
+                    'txt', 'sql', 'sh', 'c', 'cpp', 'go', 'rs'
+                  ]
+                      .map((type) => DropdownMenuItem(value: type, child: Text('.$type')))
+                      .toList(),
+                  onChanged: (type) => setState(() => selectedType = type!),
+                ),
+              ],
             ),
             actions: [
               TextButton(onPressed: () => Navigator.pop(context), child: const Text('取消')),
               FilledButton(
                 onPressed: () {
                   Navigator.pop(context);
-                  _createNewFile('untitled', selectedType);
+                  // 使用用户输入的文件名或默认值
+                  String fileName = nameController.text.trim();
+                  if (fileName.isEmpty) {
+                    fileName = 'untitled';
+                  }
+                  _createNewFile(fileName, selectedType);
                 },
                 child: const Text('创建'),
               ),
@@ -597,6 +690,18 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
       case 'js':
         template = '// $name\n\nfunction main() {\n    // TODO: implement\n}\n\nmain();\n';
         break;
+      case 'ts':
+        template = '// $name\n\nfunction main(): void {\n    // TODO: implement\n}\n\nmain();\n';
+        break;
+      case 'kt':
+        template = '// $name\n\nfun main() {\n    // TODO: implement\n}\n';
+        break;
+      case 'html':
+        template = '<!DOCTYPE html>\n<html>\n<head>\n    <title>$name</title>\n</head>\n<body>\n    <!-- TODO: implement -->\n</body>\n</html>\n';
+        break;
+      case 'css':
+        template = '/* $name */\n\n/* TODO: implement */\n';
+        break;
       case 'json':
         template = '{\n  \n}\n';
         break;
@@ -605,6 +710,27 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
         break;
       case 'md':
         template = '# ${name.replaceAll('.md', '')}\n\n';
+        break;
+      case 'xml':
+        template = '<?xml version="1.0" encoding="UTF-8"?>\n<!-- $name -->\n';
+        break;
+      case 'sql':
+        template = '-- $name\n\n-- TODO: implement\n';
+        break;
+      case 'sh':
+        template = '#!/bin/bash\n# $name\n\n# TODO: implement\n';
+        break;
+      case 'c':
+        template = '// $name\n\n#include <stdio.h>\n\nint main() {\n    // TODO: implement\n    return 0;\n}\n';
+        break;
+      case 'cpp':
+        template = '// $name\n\n#include <iostream>\n\nint main() {\n    // TODO: implement\n    return 0;\n}\n';
+        break;
+      case 'go':
+        template = '// $name\n\npackage main\n\nimport "fmt"\n\nfunc main() {\n    // TODO: implement\n}\n';
+        break;
+      case 'rs':
+        template = '// $name\n\nfn main() {\n    // TODO: implement\n}\n';
         break;
       default:
         template = '';
@@ -709,6 +835,223 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
         }
         break;
     }
+  }
+
+  /// 显示创建文件对话框
+  void _showCreateFileDialog() {
+    final TextEditingController nameController = TextEditingController();
+    String selectedType = 'dart';
+    
+    showDialog(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setState) => AlertDialog(
+            title: const Row(
+              children: [
+                Icon(Icons.insert_drive_file, color: Colors.blue),
+                SizedBox(width: 8),
+                Text('创建文件'),
+              ],
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: nameController,
+                  decoration: const InputDecoration(
+                    labelText: '文件名',
+                    hintText: '输入文件名（不含扩展名）',
+                    prefixIcon: Icon(Icons.edit),
+                  ),
+                  autofocus: true,
+                ),
+                const SizedBox(height: 16),
+                DropdownButtonFormField<String>(
+                  value: selectedType,
+                  decoration: const InputDecoration(labelText: '文件类型'),
+                  items: [
+                    'dart', 'java', 'kt', 'py', 'js', 'ts', 
+                    'html', 'css', 'json', 'yaml', 'md', 'xml',
+                    'txt', 'sql', 'sh', 'c', 'cpp', 'go', 'rs', 'php'
+                  ]
+                      .map((type) => DropdownMenuItem(value: type, child: Text('.$type')))
+                      .toList(),
+                  onChanged: (type) => setState(() => selectedType = type!),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('取消'),
+              ),
+              FilledButton.icon(
+                onPressed: () async {
+                  Navigator.pop(context);
+                  String fileName = nameController.text.trim();
+                  if (fileName.isEmpty) {
+                    fileName = 'untitled';
+                  }
+                  if (!fileName.contains('.')) {
+                    fileName = '$fileName.$selectedType';
+                  }
+                  await _createFileInProject(fileName);
+                },
+                icon: const Icon(Icons.add),
+                label: const Text('创建'),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  /// 显示创建文件夹对话框
+  void _showCreateFolderDialog() {
+    final TextEditingController nameController = TextEditingController();
+    
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Row(
+            children: [
+              Icon(Icons.create_new_folder, color: Colors.amber),
+              SizedBox(width: 8),
+              Text('创建文件夹'),
+            ],
+          ),
+          content: TextField(
+            controller: nameController,
+            decoration: const InputDecoration(
+              labelText: '文件夹名称',
+              hintText: '输入文件夹名称',
+              prefixIcon: Icon(Icons.folder),
+            ),
+            autofocus: true,
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('取消'),
+            ),
+            FilledButton.icon(
+              onPressed: () async {
+                Navigator.pop(context);
+                final folderName = nameController.text.trim();
+                if (folderName.isNotEmpty) {
+                  await _createFolderInProject(folderName);
+                }
+              },
+              icon: const Icon(Icons.add),
+              label: const Text('创建'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  /// 在项目中创建文件
+  Future<void> _createFileInProject(String fileName) async {
+    if (_currentProjectPath == null) {
+      _showError('请先打开一个项目');
+      return;
+    }
+    
+    try {
+      final filePath = p.join(_currentProjectPath!, fileName);
+      final file = File(filePath);
+      
+      if (await file.exists()) {
+        _showError('文件已存在: $fileName');
+        return;
+      }
+      
+      // 创建文件（带默认模板内容）
+      String content = '';
+      final ext = p.extension(fileName).toLowerCase();
+      switch (ext) {
+        case '.dart':
+          content = '// $fileName\n\nvoid main() {\n  // TODO: implement\n}\n';
+          break;
+        case '.py':
+          content = '# $fileName\n\ndef main():\n    pass\n\nif __name__ == "__main__":\n    main()\n';
+          break;
+        case '.java':
+          content = '// $fileName\n\npublic class ${p.basenameWithoutExtension(fileName)} {\n    public static void main(String[] args) {\n    }\n}\n';
+          break;
+        case '.js':
+          content = '// $fileName\n\nfunction main() {\n}\n\nmain();\n';
+          break;
+        case '.html':
+          content = '<!DOCTYPE html>\n<html>\n<head>\n    <title>$fileName</title>\n</head>\n<body>\n</body>\n</html>\n';
+          break;
+        case '.json':
+          content = '{\n  \n}\n';
+          break;
+        case '.md':
+          content = '# ${p.basenameWithoutExtension(fileName)}\n\n';
+          break;
+        default:
+          content = '';
+      }
+      
+      await file.writeAsString(content);
+      _showSuccess('已创建文件: $fileName');
+      
+      // 刷新文件树
+      this.setState(() {});
+      
+      // 自动打开新创建的文件
+      _loadFile(filePath);
+    } catch (e) {
+      _showError('创建文件失败: $e');
+    }
+  }
+
+  /// 在项目中创建文件夹
+  Future<void> _createFolderInProject(String folderName) async {
+    if (_currentProjectPath == null) {
+      _showError('请先打开一个项目');
+      return;
+    }
+    
+    try {
+      final folderPath = p.join(_currentProjectPath!, folderName);
+      final dir = Directory(folderPath);
+      
+      if (await dir.exists()) {
+        _showError('文件夹已存在: $folderName');
+        return;
+      }
+      
+      await dir.create(recursive: true);
+      _showSuccess('已创建文件夹: $folderName');
+      
+      // 刷新文件树
+      setState(() {});
+    } catch (e) {
+      _showError('创建文件夹失败: $e');
+    }
+  }
+
+  /// 显示编辑器设置对话框
+  void _showEditorSettingsDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => _EditorSettingsDialog(
+        settings: _editorSettings,
+        onSave: (newSettings) async {
+          await newSettings.save();
+          setState(() {
+            _editorSettings = newSettings;
+          });
+        },
+      ),
+    );
   }
 
   void _showSuccess(String message) {
@@ -982,6 +1325,243 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
       _hasChanges = keepTab.hasChanges;
     });
     _showSuccess('已关闭其他文件');
+  }
+}
+
+/// 编辑器设置对话框
+class _EditorSettingsDialog extends StatefulWidget {
+  final EditorSettings settings;
+  final Function(EditorSettings) onSave;
+
+  const _EditorSettingsDialog({
+    required this.settings,
+    required this.onSave,
+  });
+
+  @override
+  State<_EditorSettingsDialog> createState() => _EditorSettingsDialogState();
+}
+
+class _EditorSettingsDialogState extends State<_EditorSettingsDialog> {
+  late EditorSettings _settings;
+  int _selectedPresetIndex = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _settings = widget.settings;
+    // 查找匹配的预设
+    final presets = EditorColorPresets.getAllPresets();
+    for (int i = 0; i < presets.length; i++) {
+      if (presets[i]['background'] == _settings.backgroundColor &&
+          presets[i]['text'] == _settings.textColor) {
+        _selectedPresetIndex = i;
+        break;
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final presets = EditorColorPresets.getAllPresets();
+    
+    return AlertDialog(
+      title: const Text('编辑器设置'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // 预设主题
+            const Text('预设主题', style: TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: List.generate(presets.length, (index) {
+                final preset = presets[index];
+                final isSelected = index == _selectedPresetIndex;
+                return GestureDetector(
+                  onTap: () {
+                    setState(() {
+                      _selectedPresetIndex = index;
+                      _settings.backgroundColor = preset['background'] as Color;
+                      _settings.textColor = preset['text'] as Color;
+                    });
+                  },
+                  child: Container(
+                    width: 60,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: preset['background'] as Color,
+                      borderRadius: BorderRadius.circular(4),
+                      border: Border.all(
+                        color: isSelected ? Colors.blue : Colors.grey,
+                        width: isSelected ? 2 : 1,
+                      ),
+                    ),
+                    child: Center(
+                      child: Icon(
+                        preset['icon'] as IconData,
+                        color: preset['text'] as Color,
+                        size: 20,
+                      ),
+                    ),
+                  ),
+                );
+              }),
+            ),
+            const SizedBox(height: 16),
+            const Divider(),
+            const SizedBox(height: 8),
+            
+            // 字体大小
+            const Text('字体大小', style: TextStyle(fontWeight: FontWeight.bold)),
+            Row(
+              children: [
+                Expanded(
+                  child: Slider(
+                    value: _settings.fontSize,
+                    min: 10,
+                    max: 24,
+                    divisions: 14,
+                    label: '${_settings.fontSize.toInt()}',
+                    onChanged: (value) {
+                      setState(() {
+                        _settings.fontSize = value;
+                      });
+                    },
+                  ),
+                ),
+                Text('${_settings.fontSize.toInt()}px'),
+              ],
+            ),
+            const SizedBox(height: 8),
+            
+            // 行高
+            const Text('行高', style: TextStyle(fontWeight: FontWeight.bold)),
+            Row(
+              children: [
+                Expanded(
+                  child: Slider(
+                    value: _settings.lineHeight,
+                    min: 1.0,
+                    max: 2.5,
+                    divisions: 15,
+                    label: _settings.lineHeight.toStringAsFixed(1),
+                    onChanged: (value) {
+                      setState(() {
+                        _settings.lineHeight = value;
+                      });
+                    },
+                  ),
+                ),
+                Text(_settings.lineHeight.toStringAsFixed(1)),
+              ],
+            ),
+            const SizedBox(height: 8),
+            
+            // 显示行号
+            SwitchListTile(
+              title: const Text('显示行号'),
+              value: _settings.showLineNumbers,
+              onChanged: (value) {
+                setState(() {
+                  _settings.showLineNumbers = value;
+                });
+              },
+              contentPadding: EdgeInsets.zero,
+            ),
+            
+            // 自动保存
+            SwitchListTile(
+              title: const Text('自动保存'),
+              value: _settings.autoSave,
+              onChanged: (value) {
+                setState(() {
+                  _settings.autoSave = value;
+                });
+              },
+              contentPadding: EdgeInsets.zero,
+            ),
+            
+            // 自动保存延迟
+            if (_settings.autoSave) ...[
+              const Text('自动保存延迟', style: TextStyle(fontWeight: FontWeight.bold)),
+              Row(
+                children: [
+                  Expanded(
+                    child: Slider(
+                      value: _settings.autoSaveDelay.toDouble(),
+                      min: 5,
+                      max: 60,
+                      divisions: 11,
+                      label: '${_settings.autoSaveDelay}秒',
+                      onChanged: (value) {
+                        setState(() {
+                          _settings.autoSaveDelay = value.toInt();
+                        });
+                      },
+                    ),
+                  ),
+                  Text('${_settings.autoSaveDelay}秒'),
+                ],
+              ),
+            ],
+            
+            // Tab 大小
+            const Text('Tab 大小', style: TextStyle(fontWeight: FontWeight.bold)),
+            Row(
+              children: [
+                Expanded(
+                  child: Slider(
+                    value: _settings.tabSize.toDouble(),
+                    min: 2,
+                    max: 8,
+                    divisions: 3,
+                    label: '${_settings.tabSize}',
+                    onChanged: (value) {
+                      setState(() {
+                        _settings.tabSize = value.toInt();
+                      });
+                    },
+                  ),
+                ),
+                Text('${_settings.tabSize}'),
+              ],
+            ),
+            
+            // 使用空格代替 Tab
+            SwitchListTile(
+              title: const Text('使用空格代替 Tab'),
+              value: _settings.useSpaces,
+              onChanged: (value) {
+                setState(() {
+                  _settings.useSpaces = value;
+                });
+              },
+              contentPadding: EdgeInsets.zero,
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('取消'),
+        ),
+        FilledButton(
+          onPressed: () {
+            widget.onSave(_settings);
+            Navigator.pop(context);
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('设置已保存')),
+            );
+          },
+          child: const Text('保存'),
+        ),
+      ],
+    );
   }
 }
 

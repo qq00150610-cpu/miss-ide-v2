@@ -421,6 +421,73 @@ main();
     }
   }
 
+  /// 从AI响应中解析并创建多个文件
+  /// 返回创建的文件路径列表
+  Future<List<String>> parseAndCreateFiles(String response, String basePath) async {
+    final createdFiles = <String>[];
+    
+    // 匹配【文件: 路径】...【文件结束】格式
+    final pattern1 = RegExp(r'【文件:\s*(.+?)】(.*?)【文件结束】', dotAll: true);
+    final matches1 = pattern1.allMatches(response);
+    
+    // 匹配 ```语言\n文件路径\n代码\n``` 格式
+    final pattern2 = RegExp(r'```[\w]*\s*([^\n]+)\n([\s\S]*?)```', multiLine: true);
+    final matches2 = pattern2.allMatches(response);
+    
+    // 处理【文件: 路径】格式
+    for (final match in matches1) {
+      final filePath = match.group(1)?.trim() ?? '';
+      final content = match.group(2)?.trim() ?? '';
+      
+      if (filePath.isNotEmpty && content.isNotEmpty) {
+        final success = await _createFile(basePath, filePath, content);
+        if (success) {
+          createdFiles.add(p.join(basePath, filePath));
+        }
+      }
+    }
+    
+    // 处理 ```路径\n代码``` 格式
+    for (final match in matches2) {
+      final filePath = match.group(1)?.trim() ?? '';
+      final content = match.group(2)?.trim() ?? '';
+      
+      // 跳过文件名注释等非文件路径
+      if (filePath.contains('.') && !filePath.contains('：') && content.isNotEmpty) {
+        final success = await _createFile(basePath, filePath, content);
+        if (success) {
+          createdFiles.add(p.join(basePath, filePath));
+        }
+      }
+    }
+    
+    return createdFiles;
+  }
+
+  /// 创建单个文件
+  Future<bool> _createFile(String basePath, String filePath, String content) async {
+    try {
+      // 清理文件路径（移除可能的注释前缀）
+      String cleanPath = filePath;
+      if (cleanPath.contains('：')) {
+        cleanPath = cleanPath.split('：').last.trim();
+      }
+      cleanPath = cleanPath.trim();
+      
+      if (cleanPath.isEmpty) return false;
+      
+      final fullPath = p.join(basePath, cleanPath);
+      final file = File(fullPath);
+      await file.parent.create(recursive: true);
+      await file.writeAsString(content);
+      debugPrint('Created file: $fullPath');
+      return true;
+    } catch (e) {
+      debugPrint('Failed to create file: $filePath, error: $e');
+      return false;
+    }
+  }
+
   /// 使用AI生成代码
   Future<String> generateCode(String language, String description) async {
     if (!isConfigured) {

@@ -50,6 +50,9 @@ class _AIChatPageState extends State<AIChatPage> {
   // 选中的文件列表（用于 AI 分析）
   final List<String> _selectedFilesForAI = [];
   
+  // 上下文文件列表（用于 AI 对话上下文）
+  final List<String> _selectedContextFiles = [];
+  
   // API Key 验证状态
   bool _isApiKeyValid = false;
   bool _isValidating = false;
@@ -604,63 +607,67 @@ class _AIChatPageState extends State<AIChatPage> {
                   ),
                 Row(
                   children: [
+                    // 选择上下文文件按钮（替代粘贴按钮）
+                    if (widget.projectPath != null)
+                      IconButton(
+                        icon: const Icon(Icons.folder_open),
+                        onPressed: _onSelectContextFiles,
+                        tooltip: '选择上下文文件',
+                        color: _selectedContextFiles.isNotEmpty ? Colors.teal : null,
+                      ),
                     // 选择文件按钮
                     if (widget.projectPath != null)
                       IconButton(
                         icon: const Icon(Icons.file_open),
                         onPressed: _onSelectFiles,
-                        tooltip: '选择文件',
-                        color: _selectedFilesForAI.isNotEmpty ? Colors.teal : null,
-                      ),
-                    // 检查文件按钮 - 专门用于AI检查代码
-                    if (widget.projectPath != null)
-                      IconButton(
-                        icon: const Icon(Icons.search),
-                        onPressed: _onCheckFiles,
-                        tooltip: '检查文件',
-                        color: Colors.orange,
+                        tooltip: '选择分析文件',
+                        color: _selectedFilesForAI.isNotEmpty ? Colors.orange : null,
                       ),
                     Expanded(
-                      child: TextField(
-                        controller: _messageController,
-                        focusNode: _focusNode,
-                        decoration: InputDecoration(
-                          hintText: '输入问题，或使用 @read/@edit/@create 命令...',
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(24),
+                      child: Container(
+                        constraints: const BoxConstraints(maxHeight: 48),
+                        child: TextField(
+                          controller: _messageController,
+                          focusNode: _focusNode,
+                          decoration: InputDecoration(
+                            hintText: '输入问题，或使用 @read/@edit/@create 命令...',
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(24),
+                            ),
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 12,
+                            ),
+                            prefixIcon: _selectedContextFiles.isNotEmpty
+                                ? Container(
+                                    margin: const EdgeInsets.symmetric(horizontal: 8),
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                    decoration: BoxDecoration(
+                                      color: Colors.teal.shade100,
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                    child: Text(
+                                      '${_selectedContextFiles.length}个上下文',
+                                      style: TextStyle(fontSize: 10, color: Colors.teal.shade700),
+                                    ),
+                                  )
+                                : null,
+                            suffixIcon: IconButton(
+                              icon: const Icon(Icons.paste),
+                              onPressed: _pasteFromClipboard,
+                              tooltip: '粘贴代码',
+                            ),
                           ),
-                          contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 8,
-                          ),
-                          prefixIcon: _selectedFilesForAI.isNotEmpty
-                              ? Container(
-                                  margin: const EdgeInsets.symmetric(horizontal: 8),
-                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                  decoration: BoxDecoration(
-                                    color: Colors.teal.shade100,
-                                    borderRadius: BorderRadius.circular(12),
-                                  ),
-                                  child: Text(
-                                    '${_selectedFilesForAI.length}个文件',
-                                    style: TextStyle(fontSize: 10, color: Colors.teal.shade700),
-                                  ),
-                                )
-                              : null,
-                          suffixIcon: IconButton(
-                            icon: const Icon(Icons.paste),
-                            onPressed: _pasteFromClipboard,
-                            tooltip: '粘贴代码',
-                          ),
+                          maxLines: 1,
+                          minLines: 1,
+                          onSubmitted: _isLoading ? null : (_) => _sendMessage(),
                         ),
-                        maxLines: 5,
-                        minLines: 1,
-                        onSubmitted: _isLoading ? null : (_) => _sendMessage(),
                       ),
                     ),
                     const SizedBox(width: 8),
                     FloatingActionButton(
                       onPressed: _isLoading ? null : _sendMessage,
+                      mini: true,
                       child: _isLoading
                           ? const SizedBox(
                               width: 20,
@@ -1464,14 +1471,42 @@ $context
       default:
         // 在prompt中添加文件上下文
         String enhancedPrompt = text;
+        
+        // 构建上下文文件内容
+        String contextFilesContent = '';
+        if (_selectedContextFiles.isNotEmpty) {
+          for (final filePath in _selectedContextFiles) {
+            final readResult = await fileOperationService.readFile(filePath);
+            if (readResult.success && readResult.content != null) {
+              final content = readResult.content!;
+              final displayContent = content.length > 2000 
+                  ? '${content.substring(0, 2000)}\n...(内容过长已截断)' 
+                  : content;
+              contextFilesContent += '''
+【文件: $filePath】
+$displayContent
+【文件结束】
+''';
+            }
+          }
+        }
+        
         if (_lastReadContent != null && _lastReadFile != null) {
           enhancedPrompt = '''参考文件: $_lastReadFile
 
 $text
 
 ---
+$contextFilesContent
 
 注意：请结合上面的文件内容来回答问题。如果需要修改文件，请生成完整的修改后代码。''';
+        } else if (contextFilesContent.isNotEmpty) {
+          enhancedPrompt = '''上下文文件:
+$contextFilesContent
+
+用户问题: $text
+
+请结合上述上下文文件内容来回答问题。''';
         }
         
         response = await aiService.chat(enhancedPrompt);
@@ -1558,49 +1593,74 @@ $text
     // 如果有项目路径，优先保存到项目目录
     String? saveDir = widget.projectPath;
     
-    // 匹配代码块
-    final codeBlockPattern = RegExp(r'```(\w*)\n([\s\S]*?)```', multiLine: true);
-    final matches = codeBlockPattern.allMatches(response);
-    
-    if (matches.isEmpty) return createdFiles;
-    
     // 如果没有项目目录，让用户选择
     if (saveDir == null) {
       saveDir = await FilePicker.platform.getDirectoryPath();
       if (saveDir == null) return createdFiles;
     }
     
-    // 从用户提示中推断项目/文件名
-    String baseName = 'generated';
-    if (userPrompt.contains('创建') || userPrompt.contains('生成')) {
-      final nameMatch = RegExp(r'(?:创建|生成|写一个|帮我)[\s]*([a-zA-Z_\u4e00-\u9fa5]+)').firstMatch(userPrompt);
-      if (nameMatch != null) {
-        baseName = nameMatch.group(1)!.replaceAll(RegExp(r'[^\w]'), '_');
+    // 首先尝试使用 AI Service 的高级解析功能
+    if (widget.projectPath != null) {
+      final parsedFiles = await aiService.parseAndCreateFiles(response, widget.projectPath!);
+      for (final filePath in parsedFiles) {
+        if (!createdFiles.contains(filePath)) {
+          createdFiles.add(filePath);
+          // 读取文件内容添加到已保存列表
+          try {
+            final content = await File(filePath).readAsString();
+            final extension = p.extension(filePath).replaceFirst('.', '');
+            _savedFiles.add(SavedFile(
+              path: filePath,
+              content: content,
+              extension: extension,
+              savedAt: DateTime.now(),
+            ));
+          } catch (e) {
+            debugPrint('Failed to read created file: $e');
+          }
+        }
       }
     }
     
-    int fileIndex = 1;
-    for (final match in matches) {
-      final language = match.group(1)?.trim() ?? 'txt';
-      final code = match.group(2)?.trim() ?? '';
+    // 如果 AI 解析没有找到文件，使用传统方法
+    if (createdFiles.isEmpty) {
+      // 匹配代码块
+      final codeBlockPattern = RegExp(r'```(\w*)\n?([\s\S]*?)```', multiLine: true);
+      final matches = codeBlockPattern.allMatches(response);
       
-      if (code.isEmpty || code.length < 10) continue; // 跳过太短的代码
+      if (matches.isEmpty) return createdFiles;
       
-      // 根据语言确定文件扩展名
-      final extension = fileOperationService.getExtension(language);
-      
-      // 尝试从代码中提取文件名
-      String fileName = '$baseName$fileIndex.$extension';
-      
-      // 检查代码中是否有文件名注释
-      final fileNameMatch = RegExp(r'(?:文件名|filename|file)[:\s]*([a-zA-Z0-9_\-\.]+)').firstMatch(code);
-      if (fileNameMatch != null) {
-        fileName = fileNameMatch.group(1)!;
+      // 从用户提示中推断项目/文件名
+      String baseName = 'generated';
+      if (userPrompt.contains('创建') || userPrompt.contains('生成')) {
+        final nameMatch = RegExp(r'(?:创建|生成|写一个|帮我)[\s]*([a-zA-Z_\u4e00-\u9fa5]+)').firstMatch(userPrompt);
+        if (nameMatch != null) {
+          baseName = nameMatch.group(1)!.replaceAll(RegExp(r'[^\w]'), '_');
+        }
       }
       
-      // 保存文件
-      final filePath = p.join(saveDir, fileName);
-      final file = File(filePath);
+      int fileIndex = 1;
+      for (final match in matches) {
+        final language = match.group(1)?.trim() ?? 'txt';
+        final code = match.group(2)?.trim() ?? '';
+        
+        if (code.isEmpty || code.length < 10) continue; // 跳过太短的代码
+        
+        // 根据语言确定文件扩展名
+        final extension = fileOperationService.getExtension(language);
+        
+        // 尝试从代码中提取文件名
+        String fileName = '$baseName$fileIndex.$extension';
+        
+        // 检查代码中是否有文件名注释
+        final fileNameMatch = RegExp(r'(?:文件名|filename|file)[:\s]*([a-zA-Z0-9_\-\.]+)').firstMatch(code);
+        if (fileNameMatch != null) {
+          fileName = fileNameMatch.group(1)!;
+        }
+        
+        // 保存文件
+        final filePath = p.join(saveDir!, fileName);
+        final file = File(filePath);
       
       try {
         await file.parent.create(recursive: true);
@@ -1620,6 +1680,7 @@ $text
         // 保存失败，继续下一个
         debugPrint('Failed to save file: $e');
       }
+    }
     }
     
     return createdFiles;
@@ -1935,6 +1996,24 @@ $text
         const SnackBar(content: Text('代码已复制到剪贴板')),
       );
     }
+  }
+
+  /// 选择上下文文件进行AI对话
+  void _onSelectContextFiles() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) => _ContextFileSelectionSheet(
+        projectPath: widget.projectPath,
+        selectedFiles: _selectedContextFiles,
+        onConfirm: (selectedFiles) {
+          setState(() {
+            _selectedContextFiles.clear();
+            _selectedContextFiles.addAll(selectedFiles);
+          });
+        },
+      ),
+    );
   }
 
   /// 选择文件进行AI分析
@@ -2499,6 +2578,367 @@ class _FileSelectionSheetState extends State<_FileSelectionSheet> {
                       child: OutlinedButton(
                         onPressed: () => Navigator.pop(context),
                         child: const Text('取消'),
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: FilledButton(
+                        onPressed: () {
+                          widget.onConfirm(_selectedFiles.toList());
+                          Navigator.pop(context);
+                        },
+                        child: Text('确定 (${_selectedFiles.length})'),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+  
+  List<Widget> _buildPathBreadcrumbs() {
+    if (_currentPath == null) return [];
+    
+    final parts = _currentPath!.split('/');
+    final widgets = <Widget>[];
+    
+    for (int i = 0; i < parts.length; i++) {
+      if (i > 0) {
+        widgets.add(const Icon(Icons.chevron_right, size: 16));
+      }
+      widgets.add(
+        InkWell(
+          onTap: () {
+            final newPath = parts.sublist(0, i + 1).join('/');
+            setState(() {
+              _currentPath = newPath;
+              _isLoading = true;
+            });
+            _loadFiles();
+          },
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              color: i == parts.length - 1
+                  ? Theme.of(context).colorScheme.primaryContainer
+                  : null,
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: Text(
+              parts[i].isEmpty ? '/' : parts[i],
+              style: TextStyle(
+                fontSize: 12,
+                color: i == parts.length - 1
+                    ? Theme.of(context).colorScheme.onPrimaryContainer
+                    : null,
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+    
+    return widgets;
+  }
+  
+  /// 获取文件图标
+  IconData _getFileIcon(String extension) {
+    switch (extension.toLowerCase()) {
+      case 'dart':
+        return Icons.code;
+      case 'py':
+        return Icons.code;
+      case 'js':
+      case 'ts':
+        return Icons.javascript;
+      case 'java':
+        return Icons.coffee;
+      case 'go':
+        return Icons.code;
+      case 'rs':
+        return Icons.settings;
+      case 'html':
+        return Icons.html;
+      case 'css':
+        return Icons.style;
+      case 'json':
+        return Icons.data_object;
+      case 'yaml':
+      case 'yml':
+        return Icons.settings;
+      case 'md':
+        return Icons.description;
+      default:
+        return Icons.insert_drive_file;
+    }
+  }
+  
+  /// 获取文件颜色
+  Color _getFileColor(String extension) {
+    switch (extension.toLowerCase()) {
+      case 'dart':
+        return Colors.blue;
+      case 'py':
+        return Colors.green;
+      case 'js':
+        return Colors.yellow;
+      case 'java':
+        return Colors.orange;
+      case 'html':
+        return Colors.orange;
+      case 'css':
+        return Colors.blue;
+      case 'json':
+        return Colors.amber;
+      case 'yaml':
+      case 'yml':
+        return Colors.cyan;
+      default:
+        return Colors.grey;
+    }
+  }
+}
+
+/// 上下文文件选择底部弹窗（用于AI对话上下文）
+class _ContextFileSelectionSheet extends StatefulWidget {
+  final String? projectPath;
+  final List<String> selectedFiles;
+  final Function(List<String>) onConfirm;
+  
+  const _ContextFileSelectionSheet({
+    this.projectPath,
+    required this.selectedFiles,
+    required this.onConfirm,
+  });
+
+  @override
+  State<_ContextFileSelectionSheet> createState() => _ContextFileSelectionSheetState();
+}
+
+class _ContextFileSelectionSheetState extends State<_ContextFileSelectionSheet> {
+  final Set<String> _selectedFiles = {};
+  List<FileSystemEntity> _files = [];
+  bool _isLoading = true;
+  String? _currentPath;
+  
+  @override
+  void initState() {
+    super.initState();
+    _selectedFiles.addAll(widget.selectedFiles);
+    _currentPath = widget.projectPath;
+    _loadFiles();
+  }
+  
+  Future<void> _loadFiles() async {
+    if (_currentPath == null) {
+      setState(() {
+        _files = [];
+        _isLoading = false;
+      });
+      return;
+    }
+    
+    try {
+      final dir = Directory(_currentPath!);
+      final entities = await dir.list().toList();
+      
+      entities.sort((a, b) {
+        if (a is Directory && b is! Directory) return -1;
+        if (a is! Directory && b is Directory) return 1;
+        return p.basename(a.path).compareTo(p.basename(b.path));
+      });
+      
+      setState(() {
+        _files = entities.where((e) {
+          final name = p.basename(e.path);
+          return !name.startsWith('.');
+        }).toList();
+        _isLoading = false;
+      });
+    } catch (e) {
+      setState(() {
+        _files = [];
+        _isLoading = false;
+      });
+    }
+  }
+  
+  @override
+  Widget build(BuildContext context) {
+    return DraggableScrollableSheet(
+      initialChildSize: 0.7,
+      minChildSize: 0.5,
+      maxChildSize: 0.95,
+      expand: false,
+      builder: (context, scrollController) {
+        return Container(
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.surface,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+          ),
+          child: Column(
+            children: [
+              // 标题栏
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  border: Border(
+                    bottom: BorderSide(color: Theme.of(context).dividerColor),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.folder_open, color: Colors.teal),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            '选择上下文文件',
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          Text(
+                            '选中的文件内容将作为AI对话的上下文',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: Theme.of(context).colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Text(
+                      '已选 ${_selectedFiles.length} 个',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: _selectedFiles.isNotEmpty ? Colors.teal : null,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              
+              // 路径导航
+              if (_currentPath != null)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  child: Row(
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.arrow_upward, size: 20),
+                        onPressed: () {
+                          final parent = Directory(_currentPath!).parent.path;
+                          setState(() {
+                            _currentPath = parent;
+                            _isLoading = true;
+                          });
+                          _loadFiles();
+                        },
+                      ),
+                      Expanded(
+                        child: SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: Row(
+                            children: _buildPathBreadcrumbs(),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              
+              // 文件列表
+              Expanded(
+                child: _isLoading
+                    ? const Center(child: CircularProgressIndicator())
+                    : _files.isEmpty
+                        ? const Center(child: Text('空目录'))
+                        : ListView.builder(
+                            controller: scrollController,
+                            itemCount: _files.length,
+                            itemBuilder: (context, index) {
+                              final file = _files[index];
+                              final name = p.basename(file.path);
+                              final isDir = file is Directory;
+                              
+                              return ListTile(
+                                leading: isDir
+                                    ? const Icon(Icons.folder, color: Colors.amber)
+                                    : Icon(
+                                        _getFileIcon(p.extension(name).replaceFirst('.', '')),
+                                        color: _getFileColor(p.extension(name).replaceFirst('.', '')),
+                                      ),
+                                title: Text(name),
+                                subtitle: isDir ? const Text('文件夹', style: TextStyle(fontSize: 10)) : null,
+                                trailing: !isDir
+                                    ? Checkbox(
+                                        value: _selectedFiles.contains(file.path),
+                                        onChanged: (value) {
+                                          setState(() {
+                                            if (value == true) {
+                                              _selectedFiles.add(file.path);
+                                            } else {
+                                              _selectedFiles.remove(file.path);
+                                            }
+                                          });
+                                        },
+                                      )
+                                    : IconButton(
+                                        icon: const Icon(Icons.chevron_right),
+                                        onPressed: () {
+                                          setState(() {
+                                            _currentPath = file.path;
+                                            _isLoading = true;
+                                          });
+                                          _loadFiles();
+                                        },
+                                      ),
+                                onTap: isDir
+                                    ? () {
+                                        setState(() {
+                                          _currentPath = file.path;
+                                          _isLoading = true;
+                                        });
+                                        _loadFiles();
+                                      }
+                                    : () {
+                                        setState(() {
+                                          if (_selectedFiles.contains(file.path)) {
+                                            _selectedFiles.remove(file.path);
+                                          } else {
+                                            _selectedFiles.add(file.path);
+                                          }
+                                        });
+                                      },
+                              );
+                            },
+                          ),
+              ),
+              
+              // 底部按钮
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  border: Border(
+                    top: BorderSide(color: Theme.of(context).dividerColor),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () {
+                          setState(() => _selectedFiles.clear());
+                        },
+                        child: const Text('清空'),
                       ),
                     ),
                     const SizedBox(width: 16),

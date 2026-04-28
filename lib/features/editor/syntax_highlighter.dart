@@ -133,8 +133,8 @@ class SyntaxHighlighter {
     final keywords = getKeywords(language);
     final spans = <TextSpan>[];
     
-    // 正则表达式
-    final stringRegex = RegExp(r'(["\'])(?:(?!\1)[^\\]|\\.)*\1');
+    // 正则表达式 - 使用更简单的模式避免转义问题
+    final stringRegex = RegExp(r'"(?:[^"\\]|\\.)*"|\'(?:[^\'\\]|\\.)*\'');
     final singleLineCommentRegex = RegExp(r'//.*$', multiLine: true);
     final multiLineCommentRegex = RegExp(r'/\*[\s\S]*?\*/');
     final numberRegex = RegExp(r'\b\d+\.?\d*\b');

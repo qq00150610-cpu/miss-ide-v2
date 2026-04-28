@@ -455,6 +455,59 @@ main();
     }
   }
 
+  /// 识别用户意图
+  AIIntent recognizeIntent(String message) {
+    final lowerMessage = message.toLowerCase();
+    
+    // 创建项目意图
+    if (lowerMessage.contains('创建') && 
+        (lowerMessage.contains('项目') || lowerMessage.contains('工程'))) {
+      String template = 'flutter';
+      if (lowerMessage.contains('python')) template = 'python';
+      if (lowerMessage.contains('node') || lowerMessage.contains('nodejs')) template = 'nodejs';
+      
+      String projectName = 'my_project';
+      final nameMatch = RegExp(r'(?:叫|名称|名字为?|名为)([^，,。\s]+)').firstMatch(message);
+      if (nameMatch != null) {
+        projectName = nameMatch.group(1) ?? 'my_project';
+      }
+      
+      return AIIntent(
+        type: AIIntentType.createProject,
+        params: {'template': template, 'name': projectName},
+      );
+    }
+    
+    // 生成代码意图
+    if (lowerMessage.contains('生成') && 
+        (lowerMessage.contains('代码') || lowerMessage.contains('写'))) {
+      String language = 'dart';
+      if (lowerMessage.contains('python') || lowerMessage.contains('.py')) language = 'python';
+      if (lowerMessage.contains('java')) language = 'java';
+      if (lowerMessage.contains('javascript') || lowerMessage.contains('.js')) language = 'javascript';
+      if (lowerMessage.contains('go') || lowerMessage.contains('.go')) language = 'go';
+      
+      return AIIntent(
+        type: AIIntentType.generateCode,
+        params: {'language': language, 'description': message},
+      );
+    }
+    
+    // 解释代码意图
+    if (lowerMessage.contains('解释') || 
+        lowerMessage.contains('说明') ||
+        lowerMessage.contains('看懂')) {
+      if (lowerMessage.contains('代码')) {
+        return AIIntent(
+          type: AIIntentType.explainCode,
+          params: {},
+        );
+      }
+    }
+    
+    return AIIntent(type: AIIntentType.chat, params: {});
+  }
+
   /// 创建项目
   Future<String> createProject(String projectPath, String templateName) async {
     final template = _projectTemplates[templateName];

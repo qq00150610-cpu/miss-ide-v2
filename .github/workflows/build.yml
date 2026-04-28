@@ -71,36 +71,31 @@ jobs:
       - name: Increment Version
         id: version
         run: |
-          set -e
-          
           CURRENT_VERSION=${{ steps.current_version.outputs.current_version }}
           VERSION_TYPE="${inputs.version_type:-build}"
           
           echo "当前版本: $CURRENT_VERSION"
           echo "版本类型: $VERSION_TYPE"
           
-          # 使用更可靠的方式解析版本号
-          # 格式: major.minor.patch+buildNumber
+          # 解析版本号 - 使用 awk 进行可靠解析
+          MAJOR=$(echo "$CURRENT_VERSION" | awk -F'[.+]' '{print $1}')
+          REST=$(echo "$CURRENT_VERSION" | awk -F'[^0-9]' '{print $2}')
+          MINOR=$(echo "$REST" | awk -F'.' '{print $1}')
+          PATCH=$(echo "$REST" | awk -F'.' '{print $2}')
+          BUILD=$(echo "$CURRENT_VERSION" | grep -oP '(?<=\+)\d+' || echo "0")
           
-          # 提取 base 版本 (去掉 +build 部分)
-          BASE_VERSION=$(echo "$CURRENT_VERSION" | sed 's/+[0-9]*$//')
-          BUILD_NUM=$(echo "$CURRENT_VERSION" | grep -o '+[0-9]*$' | sed 's/+//')
-          if [ -z "$BUILD_NUM" ]; then BUILD_NUM=0; fi
+          # 确保数值正确
+          MAJOR=${MAJOR:-2}
+          MINOR=${MINOR:-0}
+          PATCH=${PATCH:-0}
+          BUILD=${BUILD:-0}
           
-          echo "Base版本: $BASE_VERSION, Build号: $BUILD_NUM"
-          
-          # 分割版本号
-          IFS='.' read -ra VPARTS <<< "$BASE_VERSION"
-          MAJOR="${VPARTS[0]:-2}"
-          MINOR="${VPARTS[1]:-0}"
-          PATCH="${VPARTS[2]:-0}"
-          
-          echo "解析: MAJOR=$MAJOR MINOR=$MINOR PATCH=$PATCH BUILD=$BUILD_NUM"
+          echo "解析结果: MAJOR=$MAJOR MINOR=$MINOR PATCH=$PATCH BUILD=$BUILD"
           
           # 根据版本类型递增
           case $VERSION_TYPE in
             build)
-              NEW_BUILD=$((BUILD_NUM + 1))
+              NEW_BUILD=$((BUILD + 1))
               NEW_PATCH=$PATCH
               NEW_MINOR=$MINOR
               NEW_MAJOR=$MAJOR
@@ -124,7 +119,7 @@ jobs:
               NEW_MAJOR=$((MAJOR + 1))
               ;;
             *)
-              NEW_BUILD=$((BUILD_NUM + 1))
+              NEW_BUILD=$((BUILD + 1))
               NEW_PATCH=$PATCH
               NEW_MINOR=$MINOR
               NEW_MAJOR=$MAJOR
@@ -139,11 +134,11 @@ jobs:
           
           # 更新 pubspec.yaml
           sed -i "s/^version:.*/version: $NEW_VERSION/" pubspec.yaml
-          cat pubspec.yaml | grep "^version:"
           
           echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
           echo "tag=$TAG" >> $GITHUB_OUTPUT
           echo "✓ 版本已更新到 pubspec.yaml"
+          grep "^version:" pubspec.yaml
       
       - name: Build APK
         run: |

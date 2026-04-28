@@ -55,7 +55,7 @@ jobs:
       - name: Get current version
         id: current_version
         run: |
-          VERSION=$(grep "^version:" pubspec.yaml | cut -d':' -f2 | tr -d ' ')
+          VERSION=$(grep "^version:" pubspec.yaml | sed 's/version: *//' | tr -d ' ')
           echo "current_version=$VERSION" >> $GITHUB_OUTPUT
           echo "当前版本: $VERSION"
       
@@ -71,35 +71,36 @@ jobs:
       - name: Increment Version
         id: version
         run: |
+          set -e
+          
           CURRENT_VERSION=${{ steps.current_version.outputs.current_version }}
           VERSION_TYPE="${inputs.version_type:-build}"
           
-          # 解析版本号 (major.minor.patch+build)
-          MAJOR=$(echo $CURRENT_VERSION | cut -d'.' -f1)
-          MINOR=$(echo $CURRENT_VERSION | cut -d'.' -f2 | cut -d'+' -f1)
-          PATCH=$(echo $CURRENT_VERSION | cut -d'.' -f3 | cut -d'+' -f1)
-          BUILD=$(echo $CURRENT_VERSION | grep '+' | cut -d'+' -f2)
+          echo "当前版本: $CURRENT_VERSION"
+          echo "版本类型: $VERSION_TYPE"
           
-          if [ -z "$BUILD" ]; then
-            BUILD=$(echo $CURRENT_VERSION | cut -d'+' -f2)
-            if [ -z "$BUILD" ]; then
-              PATCH=$(echo $CURRENT_VERSION | cut -d'.' -f3)
-              BUILD=0
-            fi
-          fi
+          # 使用更可靠的方式解析版本号
+          # 格式: major.minor.patch+buildNumber
           
-          # 默认值
-          if [ -z "$MAJOR" ]; then MAJOR=2; fi
-          if [ -z "$MINOR" ]; then MINOR=0; fi
-          if [ -z "$PATCH" ]; then PATCH=0; fi
-          if [ -z "$BUILD" ]; then BUILD=0; fi
+          # 提取 base 版本 (去掉 +build 部分)
+          BASE_VERSION=$(echo "$CURRENT_VERSION" | sed 's/+[0-9]*$//')
+          BUILD_NUM=$(echo "$CURRENT_VERSION" | grep -o '+[0-9]*$' | sed 's/+//')
+          if [ -z "$BUILD_NUM" ]; then BUILD_NUM=0; fi
           
-          echo "解析版本: MAJOR=$MAJOR MINOR=$MINOR PATCH=$PATCH BUILD=$BUILD"
+          echo "Base版本: $BASE_VERSION, Build号: $BUILD_NUM"
+          
+          # 分割版本号
+          IFS='.' read -ra VPARTS <<< "$BASE_VERSION"
+          MAJOR="${VPARTS[0]:-2}"
+          MINOR="${VPARTS[1]:-0}"
+          PATCH="${VPARTS[2]:-0}"
+          
+          echo "解析: MAJOR=$MAJOR MINOR=$MINOR PATCH=$PATCH BUILD=$BUILD_NUM"
           
           # 根据版本类型递增
           case $VERSION_TYPE in
             build)
-              NEW_BUILD=$((BUILD + 1))
+              NEW_BUILD=$((BUILD_NUM + 1))
               NEW_PATCH=$PATCH
               NEW_MINOR=$MINOR
               NEW_MAJOR=$MAJOR
@@ -123,7 +124,7 @@ jobs:
               NEW_MAJOR=$((MAJOR + 1))
               ;;
             *)
-              NEW_BUILD=$((BUILD + 1))
+              NEW_BUILD=$((BUILD_NUM + 1))
               NEW_PATCH=$PATCH
               NEW_MINOR=$MINOR
               NEW_MAJOR=$MAJOR
@@ -138,10 +139,11 @@ jobs:
           
           # 更新 pubspec.yaml
           sed -i "s/^version:.*/version: $NEW_VERSION/" pubspec.yaml
+          cat pubspec.yaml | grep "^version:"
           
           echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
           echo "tag=$TAG" >> $GITHUB_OUTPUT
-          echo "新版本已更新到 pubspec.yaml"
+          echo "✓ 版本已更新到 pubspec.yaml"
       
       - name: Build APK
         run: |

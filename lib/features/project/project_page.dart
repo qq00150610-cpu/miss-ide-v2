@@ -356,7 +356,7 @@ class _ProjectPageState extends State<ProjectPage>
         Container(
           padding: const EdgeInsets.all(8),
           decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.surfaceContainerHighest,
+            color: Theme.of(context).colorScheme.surfaceVariant,
           ),
           child: Row(
             children: [

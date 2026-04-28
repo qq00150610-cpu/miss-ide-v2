@@ -8,6 +8,42 @@ import 'package:miss_ide/features/file_manager/project_directory.dart';
 import 'package:miss_ide/features/editor/editor_settings.dart';
 import 'package:miss_ide/features/editor/syntax_highlighter.dart';
 
+/// VS Code Dark+ 主题颜色常量
+class VSCodeColors {
+  // 主题色
+  static const Color editorBackground = Color(0xFF1E1E1E);
+  static const Color sidebarBackground = Color(0xFF252526);
+  static const Color activityBarBackground = Color(0xFF333333);
+  static const Color statusBarBackground = Color(0xFF007ACC);
+  static const Color tabBackground = Color(0xFF2D2D2D);
+  static const Color tabActiveBackground = Color(0xFF1E1E1E);
+  
+  // 文字颜色
+  static const Color tabText = Color(0xFFCCCCCC);
+  static const Color lineNumberColor = Color(0xFF858585);
+  static const Color currentLineNumber = Color(0xFFC6C6C6);
+  static const Color statusBarText = Color(0xFFFFFFFF);
+  
+  // 边框颜色
+  static const Color borderColor = Color(0xFF3C3C3C);
+  static const Color lineNumberBorder = Color(0xFF2D2D2D);
+  
+  // 当前行高亮
+  static const Color currentLineHighlight = Color(0xFF264F78);
+}
+
+/// 编码类型映射
+class EncodingTypes {
+  static const Map<String, String> commonEncodings = {
+    'UTF-8': 'UTF-8',
+    'UTF-16': 'UTF-16',
+    'ASCII': 'ASCII',
+    'ISO-8859-1': 'ISO-8859-1',
+    'GBK': 'GBK',
+    'GB2312': 'GB2312',
+  };
+}
+
 class CodeEditorPage extends StatefulWidget {
   final String? filePath;
   final String? initialContent;
@@ -27,6 +63,7 @@ class CodeEditorPage extends StatefulWidget {
 class _CodeEditorPageState extends State<CodeEditorPage> {
   final TextEditingController _controller = TextEditingController();
   final ScrollController _scrollController = ScrollController();
+  final ScrollController _lineNumberScrollController = ScrollController();
   final FocusNode _editorFocusNode = FocusNode();
   final List<EditorTab> _tabs = [];
   int _currentTabIndex = 0;
@@ -35,6 +72,12 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
   String _currentLanguage = 'Dart';
   String? _currentProjectPath;
   bool _isDirectoryExpanded = false;
+  
+  // 当前编码
+  String _currentEncoding = 'UTF-8';
+  
+  // 当前行高亮
+  int _currentHighlightedLine = 1;
   
   // 语法高亮相关
   List<TextSpan> _highlightedSpans = [];
@@ -62,6 +105,16 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
     
     // 监听文本变化以更新语法高亮
     _controller.addListener(_onTextChanged);
+    
+    // 同步行号滚动
+    _scrollController.addListener(_syncLineNumberScroll);
+  }
+
+  /// 同步行号和编辑器滚动
+  void _syncLineNumberScroll() {
+    if (_lineNumberScrollController.hasClients) {
+      _lineNumberScrollController.jumpTo(_scrollController.offset);
+    }
   }
 
   Future<void> _loadEditorSettings() async {
@@ -78,6 +131,7 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
     _controller.removeListener(_onTextChanged);
     _controller.dispose();
     _scrollController.dispose();
+    _lineNumberScrollController.dispose();
     _editorFocusNode.dispose();
     super.dispose();
   }
@@ -201,201 +255,545 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
           ),
         ],
       ),
-      body: Row(
+      body: Column(
         children: [
-          // 左侧项目目录
-          AnimatedContainer(
-            duration: const Duration(milliseconds: 200),
-            width: _isDirectoryExpanded && _currentProjectPath != null ? 200 : 0,
-            child: _isDirectoryExpanded && _currentProjectPath != null
-                ? ProjectDirectoryPanel(
-                    projectPath: _currentProjectPath!,
-                    onFileSelected: _onFileSelectedFromDirectory,
-                    onTabOperation: _handleTabOperation,
-                    currentOpenFilePath: _tabs.isNotEmpty ? _tabs[_currentTabIndex].path : null,
-                    openFilePaths: _tabs.map((t) => t.path).toList(),
-                  )
-                : const SizedBox.shrink(),
-          ),
-          // 右侧编辑区
+          // 主体内容区（标签栏 + 编辑区）
           Expanded(
-            child: Column(
+            child: Row(
               children: [
-                // 文件标签栏
-                if (_tabs.isNotEmpty)
-                  Container(
-                    height: 36,
-                    color: Theme.of(context).colorScheme.surfaceVariant,
-                    child: ListView.builder(
-                      scrollDirection: Axis.horizontal,
-                      itemCount: _tabs.length,
-                      itemBuilder: (context, index) {
-                        final tab = _tabs[index];
-                        final isActive = index == _currentTabIndex;
-                        return GestureDetector(
-                          onTap: () => _switchTab(index),
-                          onLongPress: () => _showTabContextMenu(context, index),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                            decoration: BoxDecoration(
-                              color: isActive
-                                  ? Theme.of(context).colorScheme.surface
-                                  : Colors.transparent,
-                              border: Border(
-                                bottom: BorderSide(
-                                  color: isActive
-                                      ? Theme.of(context).colorScheme.primary
-                                      : Colors.transparent,
-                                  width: 2,
+                // 左侧项目目录
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  width: _isDirectoryExpanded && _currentProjectPath != null ? 200 : 0,
+                  child: _isDirectoryExpanded && _currentProjectPath != null
+                      ? Container(
+                          color: VSCodeColors.sidebarBackground,
+                          child: ProjectDirectoryPanel(
+                            projectPath: _currentProjectPath!,
+                            onFileSelected: _onFileSelectedFromDirectory,
+                            onTabOperation: _handleTabOperation,
+                            currentOpenFilePath: _tabs.isNotEmpty ? _tabs[_currentTabIndex].path : null,
+                            openFilePaths: _tabs.map((t) => t.path).toList(),
+                          ),
+                        )
+                      : const SizedBox.shrink(),
+                ),
+                // 右侧编辑区
+                Expanded(
+                  child: Column(
+                    children: [
+                      // VS Code 风格顶部标签栏
+                      if (_tabs.isNotEmpty)
+                        Container(
+                          height: 35,
+                          color: VSCodeColors.tabBackground,
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: ListView.builder(
+                                  scrollDirection: Axis.horizontal,
+                                  itemCount: _tabs.length,
+                                  itemBuilder: (context, index) {
+                                    final tab = _tabs[index];
+                                    final isActive = index == _currentTabIndex;
+                                    return GestureDetector(
+                                      onTap: () => _switchTab(index),
+                                      onLongPress: () => _showTabContextMenu(context, index),
+                                      child: Container(
+                                        constraints: const BoxConstraints(maxWidth: 200),
+                                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                                        decoration: BoxDecoration(
+                                          color: isActive 
+                                              ? VSCodeColors.tabActiveBackground 
+                                              : Colors.transparent,
+                                          border: Border(
+                                            top: BorderSide(
+                                              color: isActive 
+                                                  ? const Color(0xFF007ACC)  // VS Code 蓝色
+                                                  : Colors.transparent,
+                                              width: 2,
+                                            ),
+                                            right: BorderSide(
+                                              color: VSCodeColors.borderColor,
+                                              width: 1,
+                                            ),
+                                          ),
+                                        ),
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Icon(
+                                              _getFileIcon(tab.fileName),
+                                              size: 14,
+                                              color: _getFileColor(tab.fileName),
+                                            ),
+                                            const SizedBox(width: 6),
+                                            Flexible(
+                                              child: Text(
+                                                tab.fileName,
+                                                style: TextStyle(
+                                                  fontSize: 13,
+                                                  color: VSCodeColors.tabText,
+                                                  fontWeight: isActive ? FontWeight.w500 : FontWeight.normal,
+                                                ),
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            ),
+                                            if (tab.hasChanges)
+                                              Container(
+                                                margin: const EdgeInsets.only(left: 4),
+                                                child: const Text('●', 
+                                                  style: TextStyle(
+                                                    color: Color(0xFFE8AB3D),  // VS Code 橙色
+                                                    fontSize: 10,
+                                                  )
+                                                ),
+                                              ),
+                                            const SizedBox(width: 4),
+                                            InkWell(
+                                              onTap: () => _closeTab(index),
+                                              borderRadius: BorderRadius.circular(8),
+                                              child: Padding(
+                                                padding: const EdgeInsets.all(2),
+                                                child: Icon(
+                                                  Icons.close,
+                                                  size: 14,
+                                                  color: VSCodeColors.tabText.withOpacity(0.7),
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    );
+                                  },
+                                ),
+                              ),
+                              // 标签栏右侧操作按钮
+                              Container(
+                                color: VSCodeColors.tabBackground,
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    _buildToolbarButton(
+                                      icon: Icons.add,
+                                      tooltip: '新建文件',
+                                      onPressed: _newFile,
+                                    ),
+                                    _buildToolbarButton(
+                                      icon: Icons.folder_open,
+                                      tooltip: '打开文件',
+                                      onPressed: _openFile,
+                                    ),
+                                    _buildToolbarButton(
+                                      icon: Icons.save,
+                                      tooltip: '保存',
+                                      onPressed: _hasChanges ? _saveCurrentFile : null,
+                                      iconColor: _hasChanges ? const Color(0xFFE8AB3D) : null,
+                                    ),
+                                    _buildToolbarButton(
+                                      icon: Icons.settings,
+                                      tooltip: '编辑器设置',
+                                      onPressed: _showEditorSettingsDialog,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      // 编辑器工具栏
+                      Container(
+                        height: 28,
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        color: VSCodeColors.sidebarBackground,
+                        child: Row(
+                          children: [
+                            // 语言标签
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF3C3C3C),
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text(
+                                _currentLanguage,
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  color: Color(0xFFCCCCCC),
                                 ),
                               ),
                             ),
-                            child: Row(
-                              children: [
-                                Icon(
-                                  _getFileIcon(tab.fileName),
-                                  size: 14,
-                                  color: _getFileColor(tab.fileName),
+                            const SizedBox(width: 12),
+                            // 文件路径
+                            Expanded(
+                              child: Text(
+                                _currentFilePath.isEmpty ? '(新建文件)' : _currentFilePath,
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  color: Color(0xFF808080),
                                 ),
-                                const SizedBox(width: 6),
-                                Text(
-                                  tab.fileName,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            // 语法高亮状态
+                            if (_syntaxHighlightingEnabled)
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF007ACC).withOpacity(0.3),
+                                  borderRadius: BorderRadius.circular(3),
+                                ),
+                                child: const Text(
+                                  '语法高亮',
                                   style: TextStyle(
-                                    fontSize: 12,
-                                    color: tab.hasChanges ? Colors.orange : null,
+                                    fontSize: 10,
+                                    color: Color(0xFF007ACC),
                                   ),
                                 ),
-                                if (tab.hasChanges)
-                                  const Text(' ●', style: TextStyle(color: Colors.orange, fontSize: 8)),
-                                const SizedBox(width: 4),
-                                GestureDetector(
-                                  onTap: () => _closeTab(index),
-                                  child: const Icon(Icons.close, size: 14),
+                              ),
+                          ],
+                        ),
+                      ),
+                      // 代码编辑区
+                      Expanded(
+                        child: _tabs.isEmpty
+                            ? Container(
+                                color: VSCodeColors.editorBackground,
+                                child: Center(
+                                  child: Column(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Icon(
+                                        Icons.code,
+                                        size: 64,
+                                        color: const Color(0xFF808080),
+                                      ),
+                                      const SizedBox(height: 16),
+                                      const Text(
+                                        '没有打开的文件',
+                                        style: TextStyle(
+                                          color: Color(0xFF808080),
+                                          fontSize: 16,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 24),
+                                      Row(
+                                        mainAxisAlignment: MainAxisAlignment.center,
+                                        children: [
+                                          ElevatedButton.icon(
+                                            onPressed: _openFile,
+                                            icon: const Icon(Icons.folder_open, size: 18),
+                                            label: const Text('打开文件'),
+                                            style: ElevatedButton.styleFrom(
+                                              backgroundColor: const Color(0xFF007ACC),
+                                              foregroundColor: Colors.white,
+                                            ),
+                                          ),
+                                          const SizedBox(width: 16),
+                                          OutlinedButton.icon(
+                                            onPressed: _newFile,
+                                            icon: const Icon(Icons.add, size: 18),
+                                            label: const Text('新建文件'),
+                                            style: OutlinedButton.styleFrom(
+                                              foregroundColor: const Color(0xFFCCCCCC),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ],
+                                  ),
                                 ),
-                              ],
+                              )
+                            : _buildVSCodeEditor(),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          // VS Code 风格底部状态栏
+          _buildStatusBar(),
+        ],
+      ),
+    );
+  }
+  
+  /// 构建工具栏按钮
+  Widget _buildToolbarButton({
+    required IconData icon,
+    required String tooltip,
+    VoidCallback? onPressed,
+    Color? iconColor,
+  }) {
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap: onPressed,
+        child: Container(
+          width: 35,
+          height: 35,
+          alignment: Alignment.center,
+          child: Icon(
+            icon,
+            size: 18,
+            color: onPressed != null 
+                ? (iconColor ?? VSCodeColors.tabText) 
+                : VSCodeColors.tabText.withOpacity(0.3),
+          ),
+        ),
+      ),
+    );
+  }
+  
+  /// 构建 VS Code 风格的编辑器
+  Widget _buildVSCodeEditor() {
+    return Container(
+      color: VSCodeColors.editorBackground,
+      child: SingleChildScrollView(
+        controller: _scrollController,
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // 行号面板 - VS Code 风格
+            if (_editorSettings.showLineNumbers)
+              Container(
+                width: _calculateLineNumberWidth(),
+                color: VSCodeColors.sidebarBackground,
+                child: SingleChildScrollView(
+                  controller: _lineNumberScrollController,
+                  physics: const NeverScrollableScrollPhysics(),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: List.generate(
+                      _getLineCount(),
+                      (index) {
+                        final lineNumber = index + 1;
+                        final isCurrentLine = lineNumber == _currentHighlightedLine;
+                        return Container(
+                          height: _editorSettings.fontSize * _editorSettings.lineHeight,
+                          alignment: Alignment.centerRight,
+                          padding: const EdgeInsets.only(right: 12),
+                          decoration: BoxDecoration(
+                            color: isCurrentLine 
+                                ? VSCodeColors.currentLineHighlight.withOpacity(0.15)
+                                : Colors.transparent,
+                            border: Border(
+                              right: BorderSide(
+                                color: VSCodeColors.lineNumberBorder,
+                                width: 1,
+                              ),
+                            ),
+                          ),
+                          child: Text(
+                            '$lineNumber',
+                            style: TextStyle(
+                              fontFamily: 'monospace',
+                              fontSize: _editorSettings.fontSize,
+                              height: _editorSettings.lineHeight,
+                              color: isCurrentLine 
+                                  ? VSCodeColors.currentLineNumber 
+                                  : VSCodeColors.lineNumberColor,
+                              fontWeight: isCurrentLine ? FontWeight.w500 : FontWeight.normal,
                             ),
                           ),
                         );
                       },
                     ),
                   ),
-                // 工具栏
-                Container(
-                  height: 28,
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                  color: Theme.of(context).colorScheme.surfaceVariant,
-                  child: Row(
-                    children: [
-                      Text(_currentLanguage, style: const TextStyle(fontSize: 11)),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: Text(
-                          _currentFilePath.isEmpty ? '(新建文件)' : _currentFilePath,
-                          style: const TextStyle(fontSize: 11),
-                          overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            // 代码编辑区
+            Expanded(
+              child: Stack(
+                children: [
+                  // 当前行高亮背景
+                  Positioned.fill(
+                    child: IgnorePointer(
+                      child: Container(
+                        color: VSCodeColors.currentLineHighlight.withOpacity(0.1),
+                        margin: EdgeInsets.only(
+                          top: (_currentHighlightedLine - 1) * _editorSettings.fontSize * _editorSettings.lineHeight,
+                          left: 16,
+                          right: 16,
+                        ),
+                        constraints: BoxConstraints(
+                          minHeight: _editorSettings.fontSize * _editorSettings.lineHeight,
                         ),
                       ),
-                      if (_syntaxHighlightingEnabled)
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                          decoration: BoxDecoration(
-                            color: Colors.blue.withOpacity(0.2),
-                            borderRadius: BorderRadius.circular(3),
-                          ),
-                          child: const Text('高亮', style: TextStyle(fontSize: 10, color: Colors.blue)),
-                        ),
-                      const SizedBox(width: 8),
-                      Text('行: ${_getCurrentLine()}', style: const TextStyle(fontSize: 11)),
-                      const SizedBox(width: 8),
-                      Text('列: ${_getCurrentColumn()}', style: const TextStyle(fontSize: 11)),
-                    ],
+                    ),
                   ),
-                ),
-                // 代码编辑区
-                Expanded(
-                  child: _tabs.isEmpty
-                      ? Center(
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              const Icon(Icons.code, size: 64, color: Colors.grey),
-                              const SizedBox(height: 16),
-                              const Text('没有打开的文件'),
-                              const SizedBox(height: 8),
-                              Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  TextButton.icon(
-                                    onPressed: _openFile,
-                                    icon: const Icon(Icons.folder_open),
-                                    label: const Text('打开文件'),
-                                  ),
-                                  const SizedBox(width: 16),
-                                  TextButton.icon(
-                                    onPressed: _newFile,
-                                    icon: const Icon(Icons.add),
-                                    label: const Text('新建文件'),
-                                  ),
-                                ],
+                  // 高亮文本层（只读，用于显示）
+                  if (_syntaxHighlightingEnabled && _highlightedSpans.isNotEmpty)
+                    Positioned.fill(
+                      child: IgnorePointer(
+                        child: SingleChildScrollView(
+                          physics: const NeverScrollableScrollPhysics(),
+                          child: Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: RichText(
+                              text: TextSpan(
+                                children: _highlightedSpans,
+                                style: TextStyle(
+                                  fontFamily: 'monospace',
+                                  fontSize: _editorSettings.fontSize,
+                                  height: _editorSettings.lineHeight,
+                                ),
                               ),
-                            ],
-                          ),
-                        )
-                      : Container(
-                          color: _editorSettings.backgroundColor,
-                          child: SingleChildScrollView(
-                            controller: _scrollController,
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                // 行号面板 - 动态宽度以支持更多行号
-                                if (_editorSettings.showLineNumbers)
-                                  Container(
-                                    // 动态计算宽度：基于最大行号位数，最少50px，最多80px
-                                    width: _calculateLineNumberWidth(),
-                                    color: _editorSettings.backgroundColor.withOpacity(0.95),
-                                    child: SingleChildScrollView(
-                                      physics: const NeverScrollableScrollPhysics(),
-                                      child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.end,
-                                        children: List.generate(
-                                          _getLineCount(),
-                                          (index) => Container(
-                                            height: _editorSettings.fontSize * _editorSettings.lineHeight,
-                                            alignment: Alignment.centerRight,
-                                            padding: const EdgeInsets.only(right: 8),
-                                            child: Text(
-                                              '${index + 1}',
-                                              style: TextStyle(
-                                                fontFamily: 'monospace',
-                                                fontSize: _editorSettings.fontSize,
-                                                height: _editorSettings.lineHeight,
-                                                color: _editorSettings.textColor.withOpacity(0.5),
-                                              ),
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                // 分隔线
-                                Container(
-                                  width: 1,
-                                  color: _editorSettings.textColor.withOpacity(0.2),
-                                ),
-                                // 代码编辑区 - 支持自动换行
-                                Expanded(
-                                  child: Container(
-                                    color: _editorSettings.backgroundColor,
-                                    child: _buildCodeEditor(),
-                                  ),
-                                ),
-                              ],
                             ),
                           ),
                         ),
-                ),
-              ],
+                      ),
+                    ),
+                  // 透明输入层
+                  Positioned.fill(
+                    child: TextField(
+                      controller: _controller,
+                      focusNode: _editorFocusNode,
+                      autofocus: true,
+                      maxLines: null,
+                      expands: false,
+                      keyboardType: TextInputType.multiline,
+                      textInputAction: TextInputAction.newline,
+                      scrollPhysics: const NeverScrollableScrollPhysics(),
+                      style: TextStyle(
+                        fontFamily: 'monospace',
+                        fontSize: _editorSettings.fontSize,
+                        height: _editorSettings.lineHeight,
+                        color: _syntaxHighlightingEnabled 
+                            ? Colors.transparent 
+                            : VSCodeColors.tabText,
+                      ),
+                      cursorColor: const Color(0xFFAEAFAD),
+                      cursorWidth: 2,
+                      decoration: InputDecoration(
+                        border: InputBorder.none,
+                        contentPadding: const EdgeInsets.all(16),
+                        fillColor: Colors.transparent,
+                        filled: true,
+                      ),
+                      onChanged: (value) {
+                        // 更新当前行
+                        _updateCurrentLine();
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+  
+  /// 更新当前行号
+  void _updateCurrentLine() {
+    final cursorPos = _controller.selection.baseOffset;
+    if (cursorPos < 0) return;
+    final text = _controller.text.substring(0, cursorPos);
+    final newLine = text.split('\n').length;
+    if (newLine != _currentHighlightedLine) {
+      setState(() {
+        _currentHighlightedLine = newLine;
+      });
+    }
+  }
+  
+  /// 构建 VS Code 风格底部状态栏
+  Widget _buildStatusBar() {
+    return Container(
+      height: 24,
+      color: VSCodeColors.statusBarBackground,
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      child: Row(
+        children: [
+          // 左侧：Git 分支、错误/警告数量
+          _buildStatusBarItem(
+            icon: Icons.account_tree,
+            text: 'main',
+            color: VSCodeColors.statusBarText,
+          ),
+          const SizedBox(width: 8),
+          // 错误数量
+          _buildStatusBarItem(
+            icon: Icons.error_outline,
+            text: '0',
+            color: const Color(0xFFF14C4C),
+            tooltip: '错误',
+          ),
+          const SizedBox(width: 4),
+          // 警告数量
+          _buildStatusBarItem(
+            icon: Icons.warning_amber,
+            text: '0',
+            color: const Color(0xFFCCA700),
+            tooltip: '警告',
+          ),
+          const Spacer(),
+          // 右侧：位置信息
+          _buildStatusBarItem(
+            text: '行 $_currentHighlightedLine',
+            color: VSCodeColors.statusBarText,
+            tooltip: '当前行',
+          ),
+          const SizedBox(width: 8),
+          _buildStatusBarItem(
+            text: '列 ${_getCurrentColumn()}',
+            color: VSCodeColors.statusBarText,
+            tooltip: '当前列',
+          ),
+          const SizedBox(width: 8),
+          // 文件编码
+          GestureDetector(
+            onTap: _showEncodingSelector,
+            child: _buildStatusBarItem(
+              text: _currentEncoding,
+              color: VSCodeColors.statusBarText,
+              tooltip: '文件编码 (点击更改)',
+            ),
+          ),
+          const SizedBox(width: 8),
+          // 文件类型
+          _buildStatusBarItem(
+            text: _currentLanguage,
+            color: VSCodeColors.statusBarText,
+            tooltip: '语言模式',
+          ),
+          const SizedBox(width: 8),
+          // 缩进方式
+          _buildStatusBarItem(
+            text: _editorSettings.useSpaces ? '空格: ${_editorSettings.tabSize}' : 'Tab Size: ${_editorSettings.tabSize}',
+            color: VSCodeColors.statusBarText,
+            tooltip: '缩进方式',
+          ),
+        ],
+      ),
+    );
+  }
+  
+  /// 构建状态栏项
+  Widget _buildStatusBarItem({
+    IconData? icon,
+    required String text,
+    required Color color,
+    String? tooltip,
+  }) {
+    return Tooltip(
+      message: tooltip ?? '',
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (icon != null) ...[
+            Icon(icon, size: 14, color: color),
+            const SizedBox(width: 2),
+          ],
+          Text(
+            text,
+            style: TextStyle(
+              fontSize: 12,
+              color: color,
             ),
           ),
         ],
@@ -403,93 +801,64 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
     );
   }
   
-  /// 构建代码编辑器 - 支持语法高亮和自动换行
-  Widget _buildCodeEditor() {
-    if (_syntaxHighlightingEnabled && _highlightedSpans.isNotEmpty) {
-      // 使用语法高亮模式
-      return Stack(
-        children: [
-          // 高亮文本层（只读，用于显示）- 支持自动换行
-          Positioned.fill(
-            child: IgnorePointer(
-              child: SingleChildScrollView(
-                controller: ScrollController(),
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: RichText(
-                    softWrap: true, // 启用自动换行
-                    text: TextSpan(
-                      children: _highlightedSpans,
-                      style: TextStyle(
-                        fontFamily: 'monospace',
-                        fontSize: _editorSettings.fontSize,
-                        height: _editorSettings.lineHeight,
-                      ),
-                    ),
-                  ),
+  /// 显示编码选择器
+  void _showEncodingSelector() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: VSCodeColors.sidebarBackground,
+      builder: (context) => Container(
+        padding: const EdgeInsets.symmetric(vertical: 16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Text(
+                '选择文件编码',
+                style: TextStyle(
+                  color: VSCodeColors.tabText,
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
                 ),
               ),
             ),
-          ),
-          // 透明输入层（用于输入）- 支持自动换行
-          Positioned.fill(
-            child: TextField(
-              controller: _controller,
-              focusNode: _editorFocusNode,
-              autofocus: true,
-              enabled: true,
-              readOnly: false,
-              maxLines: null,
-              expands: false,
-              keyboardType: TextInputType.multiline,
-              textInputAction: TextInputAction.newline,
-              scrollPhysics: const NeverScrollableScrollPhysics(),
-              style: TextStyle(
-                fontFamily: 'monospace',
-                fontSize: _editorSettings.fontSize,
-                height: _editorSettings.lineHeight,
-                color: Colors.transparent, // 透明文字，让高亮层显示
-              ),
-              cursorColor: _editorSettings.textColor,
-              decoration: InputDecoration(
-                border: InputBorder.none,
-                contentPadding: const EdgeInsets.all(16),
-                fillColor: Colors.transparent,
-                filled: true,
-              ),
-            ),
-          ),
-        ],
-      );
-    } else {
-      // 普通模式（无语法高亮）- 支持自动换行
-      return TextField(
-        controller: _controller,
-        focusNode: _editorFocusNode,
-        autofocus: true,
-        enabled: true,
-        readOnly: false,
-        maxLines: null,
-        expands: false,
-        keyboardType: TextInputType.multiline,
-        textInputAction: TextInputAction.newline,
-        scrollPhysics: const NeverScrollableScrollPhysics(),
-        style: TextStyle(
-          fontFamily: 'monospace',
-          fontSize: _editorSettings.fontSize,
-          height: _editorSettings.lineHeight,
-          color: _editorSettings.textColor,
+            const Divider(color: VSCodeColors.borderColor),
+            ...EncodingTypes.commonEncodings.entries.map((entry) {
+              final isSelected = entry.key == _currentEncoding;
+              return ListTile(
+                leading: Icon(
+                  isSelected ? Icons.check : null,
+                  color: const Color(0xFF007ACC),
+                ),
+                title: Text(
+                  entry.key,
+                  style: TextStyle(
+                    color: isSelected ? const Color(0xFF007ACC) : VSCodeColors.tabText,
+                    fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                  ),
+                ),
+                subtitle: Text(
+                  entry.value,
+                  style: const TextStyle(
+                    color: Color(0xFF808080),
+                    fontSize: 12,
+                  ),
+                ),
+                onTap: () {
+                  setState(() {
+                    _currentEncoding = entry.key;
+                  });
+                  Navigator.pop(context);
+                },
+              );
+            }),
+          ],
         ),
-        decoration: InputDecoration(
-          border: InputBorder.none,
-          contentPadding: const EdgeInsets.all(16),
-          fillColor: _editorSettings.backgroundColor,
-          filled: true,
-        ),
-      );
-    }
+      ),
+    );
   }
-
+  
   void _onContentChanged() {
     if (!_hasChanges && _tabs.isNotEmpty) {
       setState(() {

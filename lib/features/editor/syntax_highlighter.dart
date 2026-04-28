@@ -1,17 +1,19 @@
 import 'package:flutter/material.dart';
 
-/// 简单的语法高亮工具类
+/// VS Code Dark+ 风格语法高亮工具类
 /// 不使用第三方包，自己实现基础语法高亮
 class SyntaxHighlighter {
-  // 高亮颜色配置
+  // VS Code Dark+ 主题颜色
   static const Color keywordColor = Color(0xFF569CD6);      // 蓝色 - 关键词
-  static const Color stringColor = Color(0xFF6A9955);        // 绿色 - 字符串
-  static const Color commentColor = Color(0xFF6A6A6A);        // 灰色 - 注释
+  static const Color stringColor = Color(0xFFCE9178);        // 橙色 - 字符串
+  static const Color commentColor = Color(0xFF6A9955);        // 绿色 - 注释
   static const Color numberColor = Color(0xFFB5CEA8);         // 浅绿色 - 数字
   static const Color functionColor = Color(0xFFDCDCAA);      // 黄色 - 函数名
   static const Color typeColor = Color(0xFF4EC9B0);           // 青色 - 类型
   static const Color annotationColor = Color(0xFFD7BA7D);    // 金色 - 注解
   static const Color operatorColor = Color(0xFFD4D4D4);       // 浅灰色 - 操作符
+  static const Color variableColor = Color(0xFF9CDCFE);       // 浅蓝色 - 变量
+  static const Color constantColor = Color(0xFF4FC1FF);       // 亮蓝色 - 常量
   
   // Dart 关键词
   static const Set<String> dartKeywords = {

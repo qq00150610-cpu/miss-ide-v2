@@ -6,6 +6,7 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:miss_ide/features/file_manager/project_directory.dart';
 import 'package:miss_ide/features/editor/editor_settings.dart';
+import 'package:miss_ide/features/editor/syntax_highlighter.dart';
 
 class CodeEditorPage extends StatefulWidget {
   final String? filePath;
@@ -26,14 +27,18 @@ class CodeEditorPage extends StatefulWidget {
 class _CodeEditorPageState extends State<CodeEditorPage> {
   final TextEditingController _controller = TextEditingController();
   final ScrollController _scrollController = ScrollController();
-  final List<EditorTab> _tabs = [];
   final FocusNode _editorFocusNode = FocusNode();
+  final List<EditorTab> _tabs = [];
   int _currentTabIndex = 0;
   bool _hasChanges = false;
   String _currentFilePath = '';
   String _currentLanguage = 'Dart';
   String? _currentProjectPath;
   bool _isDirectoryExpanded = false;
+  
+  // 语法高亮相关
+  List<TextSpan> _highlightedSpans = [];
+  bool _syntaxHighlightingEnabled = true;
   
   // 自动保存相关
   Timer? _autoSaveTimer;
@@ -54,22 +59,50 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
     }
     // 加载编辑器设置
     _loadEditorSettings();
+    
+    // 监听文本变化以更新语法高亮
+    _controller.addListener(_onTextChanged);
   }
 
   Future<void> _loadEditorSettings() async {
     final settings = await EditorSettings.load();
     setState(() {
       _editorSettings = settings;
+      _updateSyntaxHighlighting();
     });
   }
 
   @override
   void dispose() {
     _autoSaveTimer?.cancel();
+    _controller.removeListener(_onTextChanged);
     _controller.dispose();
     _scrollController.dispose();
     _editorFocusNode.dispose();
     super.dispose();
+  }
+  
+  /// 文本变化监听器
+  void _onTextChanged() {
+    _updateSyntaxHighlighting();
+    _onContentChanged();
+  }
+  
+  /// 更新语法高亮
+  void _updateSyntaxHighlighting() {
+    if (!_syntaxHighlightingEnabled) {
+      _highlightedSpans = [];
+      return;
+    }
+    
+    // 根据语言类型更新高亮
+    final code = _controller.text;
+    _highlightedSpans = SyntaxHighlighter.highlight(
+      code,
+      _currentLanguage,
+      defaultColor: _editorSettings.textColor,
+      fontSize: _editorSettings.fontSize,
+    );
   }
 
   @override
@@ -89,6 +122,21 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
               )
             : null,
         actions: [
+          // 语法高亮开关
+          if (_tabs.isNotEmpty)
+            IconButton(
+              icon: Icon(
+                _syntaxHighlightingEnabled ? Icons.highlight : Icons.highlight_off,
+                color: _syntaxHighlightingEnabled ? Colors.amber : Colors.grey,
+              ),
+              onPressed: () {
+                setState(() {
+                  _syntaxHighlightingEnabled = !_syntaxHighlightingEnabled;
+                  _updateSyntaxHighlighting();
+                });
+              },
+              tooltip: _syntaxHighlightingEnabled ? '关闭语法高亮' : '开启语法高亮',
+            ),
           // 创建文件/文件夹按钮
           if (_currentProjectPath != null)
             PopupMenuButton<String>(
@@ -247,6 +295,16 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
+                      if (_syntaxHighlightingEnabled)
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                          decoration: BoxDecoration(
+                            color: Colors.blue.withOpacity(0.2),
+                            borderRadius: BorderRadius.circular(3),
+                          ),
+                          child: const Text('高亮', style: TextStyle(fontSize: 10, color: Colors.blue)),
+                        ),
+                      const SizedBox(width: 8),
                       Text('行: ${_getCurrentLine()}', style: const TextStyle(fontSize: 11)),
                       const SizedBox(width: 8),
                       Text('列: ${_getCurrentColumn()}', style: const TextStyle(fontSize: 11)),
@@ -322,35 +380,11 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
                                   height: _getLineCount() * _editorSettings.fontSize * _editorSettings.lineHeight,
                                   color: _editorSettings.textColor.withOpacity(0.2),
                                 ),
-                                // 代码编辑区
+                                // 代码编辑区 - 使用语法高亮
                                 Expanded(
                                   child: Container(
                                     color: _editorSettings.backgroundColor,
-                                    child: TextField(
-                                      controller: _controller,
-                                      focusNode: _editorFocusNode,
-                                      autofocus: true,
-                                      enabled: true,
-                                      readOnly: false,
-                                      maxLines: null,
-                                      expands: false,
-                                      keyboardType: TextInputType.multiline,
-                                      textInputAction: TextInputAction.newline,
-                                      scrollPhysics: const NeverScrollableScrollPhysics(),
-                                      style: TextStyle(
-                                        fontFamily: 'monospace',
-                                        fontSize: _editorSettings.fontSize,
-                                        height: _editorSettings.lineHeight,
-                                        color: _editorSettings.textColor,
-                                      ),
-                                      decoration: InputDecoration(
-                                        border: InputBorder.none,
-                                        contentPadding: const EdgeInsets.all(16),
-                                        fillColor: _editorSettings.backgroundColor,
-                                        filled: true,
-                                      ),
-                                      onChanged: (_) => _onContentChanged(),
-                                    ),
+                                    child: _buildCodeEditor(),
                                   ),
                                 ),
                               ],
@@ -364,6 +398,92 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
         ],
       ),
     );
+  }
+  
+  /// 构建代码编辑器 - 支持语法高亮
+  Widget _buildCodeEditor() {
+    if (_syntaxHighlightingEnabled && _highlightedSpans.isNotEmpty) {
+      // 使用语法高亮模式
+      return Stack(
+        children: [
+          // 高亮文本层（只读，用于显示）
+          Positioned.fill(
+            child: IgnorePointer(
+              child: SingleChildScrollView(
+                controller: ScrollController(),
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: RichText(
+                    text: TextSpan(
+                      children: _highlightedSpans,
+                      style: TextStyle(
+                        fontFamily: 'monospace',
+                        fontSize: _editorSettings.fontSize,
+                        height: _editorSettings.lineHeight,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          // 透明输入层（用于输入）
+          Positioned.fill(
+            child: TextField(
+              controller: _controller,
+              focusNode: _editorFocusNode,
+              autofocus: true,
+              enabled: true,
+              readOnly: false,
+              maxLines: null,
+              expands: false,
+              keyboardType: TextInputType.multiline,
+              textInputAction: TextInputAction.newline,
+              scrollPhysics: const NeverScrollableScrollPhysics(),
+              style: TextStyle(
+                fontFamily: 'monospace',
+                fontSize: _editorSettings.fontSize,
+                height: _editorSettings.lineHeight,
+                color: Colors.transparent, // 透明文字，让高亮层显示
+              ),
+              cursorColor: _editorSettings.textColor,
+              decoration: InputDecoration(
+                border: InputBorder.none,
+                contentPadding: const EdgeInsets.all(16),
+                fillColor: Colors.transparent,
+                filled: true,
+              ),
+            ),
+          ),
+        ],
+      );
+    } else {
+      // 普通模式（无语法高亮）
+      return TextField(
+        controller: _controller,
+        focusNode: _editorFocusNode,
+        autofocus: true,
+        enabled: true,
+        readOnly: false,
+        maxLines: null,
+        expands: false,
+        keyboardType: TextInputType.multiline,
+        textInputAction: TextInputAction.newline,
+        scrollPhysics: const NeverScrollableScrollPhysics(),
+        style: TextStyle(
+          fontFamily: 'monospace',
+          fontSize: _editorSettings.fontSize,
+          height: _editorSettings.lineHeight,
+          color: _editorSettings.textColor,
+        ),
+        decoration: InputDecoration(
+          border: InputBorder.none,
+          contentPadding: const EdgeInsets.all(16),
+          fillColor: _editorSettings.backgroundColor,
+          filled: true,
+        ),
+      );
+    }
   }
 
   void _onContentChanged() {
@@ -544,6 +664,7 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
         _currentFilePath = path;
         _currentLanguage = _getLanguage(fileName);
         _hasChanges = false;
+        _updateSyntaxHighlighting();
       });
     } catch (e) {
       _showError('读取文件失败: $e');
@@ -573,7 +694,35 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
   }
 
   Future<void> _saveAs() async {
-    // Android 不支持 FilePicker.platform.saveFile，使用对话框保存到项目目录
+    // 修改：如果当前文件已有名称，直接保存，不再弹出对话框
+    final currentTab = _tabs.isNotEmpty ? _tabs[_currentTabIndex] : null;
+    final existingFileName = currentTab?.fileName ?? '';
+    
+    // 如果有文件名且不是新建文件（路径为空），直接保存
+    if (existingFileName.isNotEmpty && (currentTab?.path.isEmpty ?? true)) {
+      // 首次保存，需要用户输入文件名
+      await _saveAsWithDialog();
+    } else if (currentTab?.path.isNotEmpty ?? false) {
+      // 文件已有路径，直接保存
+      try {
+        final file = File(currentTab!.path);
+        await file.writeAsString(_controller.text);
+        setState(() {
+          _tabs[_currentTabIndex].hasChanges = false;
+          _hasChanges = false;
+        });
+        _showSuccess('文件已保存');
+      } catch (e) {
+        _showError('保存失败: $e');
+      }
+    } else {
+      // 真的没有文件名，弹出对话框
+      await _saveAsWithDialog();
+    }
+  }
+  
+  /// 另存为 - 弹出文件名输入对话框
+  Future<void> _saveAsWithDialog() async {
     final TextEditingController nameController = TextEditingController(text: 'untitled.txt');
     
     final fileName = await showDialog<String>(
@@ -647,8 +796,19 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
     }
   }
 
-  /// 新建文件 - 修复：添加自定义文件名输入框
+  /// 新建文件 - 优化：创建后直接保存到项目目录
   void _newFile() {
+    // 如果有项目路径，直接创建并保存
+    if (_currentProjectPath != null && _currentProjectPath!.isNotEmpty) {
+      _newFileWithSave();
+    } else {
+      // 没有项目路径，创建临时文件（不保存）
+      _newFileWithoutSave();
+    }
+  }
+  
+  /// 新建文件 - 有项目路径时，创建后直接保存
+  void _newFileWithSave() {
     showDialog(
       context: context,
       builder: (context) {
@@ -677,7 +837,69 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
                   items: [
                     'dart', 'java', 'kt', 'py', 'js', 'ts', 
                     'html', 'css', 'json', 'yaml', 'md', 'xml',
-                    'txt', 'sql', 'sh', 'c', 'cpp', 'go', 'rs'
+                    'txt', 'sql', 'sh', 'c', 'cpp', 'go', 'rs', 'php'
+                  ]
+                      .map((type) => DropdownMenuItem(value: type, child: Text('.$type')))
+                      .toList(),
+                  onChanged: (type) => setState(() => selectedType = type!),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(context), child: const Text('取消')),
+              FilledButton(
+                onPressed: () {
+                  Navigator.pop(context);
+                  // 使用用户输入的文件名或默认值
+                  String fileName = nameController.text.trim();
+                  if (fileName.isEmpty) {
+                    fileName = 'untitled';
+                  }
+                  if (!fileName.contains('.')) {
+                    fileName = '$fileName.$selectedType';
+                  }
+                  _createNewFileAndSave(fileName, selectedType);
+                },
+                child: const Text('创建'),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+  
+  /// 新建文件 - 无项目路径时，创建临时文件
+  void _newFileWithoutSave() {
+    showDialog(
+      context: context,
+      builder: (context) {
+        final TextEditingController nameController = TextEditingController();
+        String selectedType = 'dart';
+        return StatefulBuilder(
+          builder: (context, setState) => AlertDialog(
+            title: const Text('新建文件'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // 文件名输入框
+                TextField(
+                  controller: nameController,
+                  decoration: const InputDecoration(
+                    labelText: '文件名',
+                    hintText: '输入文件名（不含扩展名）',
+                  ),
+                  autofocus: true,
+                ),
+                const SizedBox(height: 16),
+                // 文件类型下拉选择
+                DropdownButtonFormField<String>(
+                  value: selectedType,
+                  decoration: const InputDecoration(labelText: '文件类型'),
+                  items: [
+                    'dart', 'java', 'kt', 'py', 'js', 'ts', 
+                    'html', 'css', 'json', 'yaml', 'md', 'xml',
+                    'txt', 'sql', 'sh', 'c', 'cpp', 'go', 'rs', 'php'
                   ]
                       .map((type) => DropdownMenuItem(value: type, child: Text('.$type')))
                       .toList(),
@@ -705,68 +927,97 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
       },
     );
   }
+  
+  /// 创建新文件并保存到项目目录
+  Future<void> _createNewFileAndSave(String fileName, String type) async {
+    if (!fileName.endsWith('.$type')) {
+      fileName = '$fileName.$type';
+    }
+    
+    // 生成模板内容
+    String template = _generateTemplate(fileName, type);
+    
+    try {
+      // 保存到项目目录
+      final filePath = p.join(_currentProjectPath!, fileName);
+      final file = File(filePath);
+      
+      if (await file.exists()) {
+        _showError('文件已存在: $fileName');
+        return;
+      }
+      
+      await file.writeAsString(template);
+      _showSuccess('已创建并保存文件: $fileName');
+      
+      // 添加到标签页并打开
+      setState(() {
+        _tabs.add(EditorTab(
+          fileName: fileName,
+          path: filePath,
+          content: template,
+        ));
+        _currentTabIndex = _tabs.length - 1;
+        _controller.text = template;
+        _currentFilePath = filePath;
+        _currentLanguage = _getLanguage(fileName);
+        _hasChanges = false;
+        _updateSyntaxHighlighting();
+      });
+    } catch (e) {
+      _showError('创建文件失败: $e');
+    }
+  }
+  
+  /// 生成代码模板
+  String _generateTemplate(String name, String type) {
+    switch (type) {
+      case 'dart':
+        return '// $name\n\nvoid main() {\n  // TODO: implement\n}\n';
+      case 'java':
+        return '// $name\n\npublic class ${name.replaceAll('.java', '')} {\n    public static void main(String[] args) {\n        // TODO: implement\n    }\n}\n';
+      case 'py':
+        return '# $name\n\ndef main():\n    # TODO: implement\n    pass\n\nif __name__ == "__main__":\n    main()\n';
+      case 'js':
+        return '// $name\n\nfunction main() {\n    // TODO: implement\n}\n\nmain();\n';
+      case 'ts':
+        return '// $name\n\nfunction main(): void {\n    // TODO: implement\n}\n\nmain();\n';
+      case 'kt':
+        return '// $name\n\nfun main() {\n    // TODO: implement\n}\n';
+      case 'html':
+        return '<!DOCTYPE html>\n<html>\n<head>\n    <title>$name</title>\n</head>\n<body>\n    <!-- TODO: implement -->\n</body>\n</html>\n';
+      case 'css':
+        return '/* $name */\n\n/* TODO: implement */\n';
+      case 'json':
+        return '{\n  \n}\n';
+      case 'yaml':
+        return '# $name\n\n';
+      case 'md':
+        return '# ${name.replaceAll('.md', '')}\n\n';
+      case 'xml':
+        return '<?xml version="1.0" encoding="UTF-8"?>\n<!-- $name -->\n';
+      case 'sql':
+        return '-- $name\n\n-- TODO: implement\n';
+      case 'sh':
+        return '#!/bin/bash\n# $name\n\n# TODO: implement\n';
+      case 'c':
+        return '// $name\n\n#include <stdio.h>\n\nint main() {\n    // TODO: implement\n    return 0;\n}\n';
+      case 'cpp':
+        return '// $name\n\n#include <iostream>\n\nint main() {\n    // TODO: implement\n    return 0;\n}\n';
+      case 'go':
+        return '// $name\n\npackage main\n\nimport "fmt"\n\nfunc main() {\n    // TODO: implement\n}\n';
+      case 'rs':
+        return '// $name\n\nfn main() {\n    // TODO: implement\n}\n';
+      case 'php':
+        return '<?php\n// $name\n\n// TODO: implement\n';
+      default:
+        return '';
+    }
+  }
 
   void _createNewFile(String name, String type) {
     if (!name.endsWith('.$type')) name = '$name.$type';
-    String template = '';
-    switch (type) {
-      case 'dart':
-        template = '// $name\n\nvoid main() {\n  // TODO: implement\n}\n';
-        break;
-      case 'java':
-        template = '// $name\n\npublic class ${name.replaceAll('.java', '')} {\n    public static void main(String[] args) {\n        // TODO: implement\n    }\n}\n';
-        break;
-      case 'py':
-        template = '# $name\n\ndef main():\n    # TODO: implement\n    pass\n\nif __name__ == "__main__":\n    main()\n';
-        break;
-      case 'js':
-        template = '// $name\n\nfunction main() {\n    // TODO: implement\n}\n\nmain();\n';
-        break;
-      case 'ts':
-        template = '// $name\n\nfunction main(): void {\n    // TODO: implement\n}\n\nmain();\n';
-        break;
-      case 'kt':
-        template = '// $name\n\nfun main() {\n    // TODO: implement\n}\n';
-        break;
-      case 'html':
-        template = '<!DOCTYPE html>\n<html>\n<head>\n    <title>$name</title>\n</head>\n<body>\n    <!-- TODO: implement -->\n</body>\n</html>\n';
-        break;
-      case 'css':
-        template = '/* $name */\n\n/* TODO: implement */\n';
-        break;
-      case 'json':
-        template = '{\n  \n}\n';
-        break;
-      case 'yaml':
-        template = '# $name\n\n';
-        break;
-      case 'md':
-        template = '# ${name.replaceAll('.md', '')}\n\n';
-        break;
-      case 'xml':
-        template = '<?xml version="1.0" encoding="UTF-8"?>\n<!-- $name -->\n';
-        break;
-      case 'sql':
-        template = '-- $name\n\n-- TODO: implement\n';
-        break;
-      case 'sh':
-        template = '#!/bin/bash\n# $name\n\n# TODO: implement\n';
-        break;
-      case 'c':
-        template = '// $name\n\n#include <stdio.h>\n\nint main() {\n    // TODO: implement\n    return 0;\n}\n';
-        break;
-      case 'cpp':
-        template = '// $name\n\n#include <iostream>\n\nint main() {\n    // TODO: implement\n    return 0;\n}\n';
-        break;
-      case 'go':
-        template = '// $name\n\npackage main\n\nimport "fmt"\n\nfunc main() {\n    // TODO: implement\n}\n';
-        break;
-      case 'rs':
-        template = '// $name\n\nfn main() {\n    // TODO: implement\n}\n';
-        break;
-      default:
-        template = '';
-    }
+    String template = _generateTemplate(name, type);
     
     setState(() {
       _tabs.add(EditorTab(fileName: name, path: '', content: template));
@@ -775,6 +1026,7 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
       _currentFilePath = '';
       _currentLanguage = _getLanguage(name);
       _hasChanges = true;
+      _updateSyntaxHighlighting();
     });
   }
 
@@ -788,6 +1040,7 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
       _currentFilePath = _tabs[index].path;
       _currentLanguage = _getLanguage(_tabs[index].fileName);
       _hasChanges = _tabs[index].hasChanges;
+      _updateSyntaxHighlighting();
     });
   }
 
@@ -1080,6 +1333,7 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
           await newSettings.save();
           setState(() {
             _editorSettings = newSettings;
+            _updateSyntaxHighlighting();
           });
         },
       ),
@@ -1221,6 +1475,7 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
         _currentFilePath = '';
         _currentLanguage = 'Text';
         _hasChanges = false;
+        _highlightedSpans = [];
       } else {
         if (_currentTabIndex >= _tabs.length) {
           _currentTabIndex = _tabs.length - 1;
@@ -1229,6 +1484,7 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
         _currentFilePath = _tabs[_currentTabIndex].path;
         _currentLanguage = _getLanguage(_tabs[_currentTabIndex].fileName);
         _hasChanges = _tabs[_currentTabIndex].hasChanges;
+        _updateSyntaxHighlighting();
       }
     });
   }
@@ -1287,6 +1543,7 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
       _currentFilePath = '';
       _currentLanguage = 'Text';
       _hasChanges = false;
+      _highlightedSpans = [];
     });
     _showSuccess('已关闭所有文件');
   }
@@ -1355,6 +1612,7 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
       _currentFilePath = keepTab.path;
       _currentLanguage = _getLanguage(keepTab.fileName);
       _hasChanges = keepTab.hasChanges;
+      _updateSyntaxHighlighting();
     });
     _showSuccess('已关闭其他文件');
   }
@@ -1396,7 +1654,6 @@ class _EditorSettingsDialogState extends State<_EditorSettingsDialog> {
   @override
   Widget build(BuildContext context) {
     final presets = EditorColorPresets.getAllPresets();
-    
     return AlertDialog(
       title: const Text('编辑器设置'),
       content: SingleChildScrollView(

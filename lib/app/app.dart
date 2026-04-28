@@ -36,6 +36,7 @@ class MainPageState extends State<MainPage> {
   String? _currentProjectPath;
   String? _currentProjectName;
   bool _showProjectDetail = false;
+  String? _currentFilePath; // 当前选中的文件路径
 
   void _onProjectSelected(String path, String name) {
     setState(() {
@@ -70,13 +71,17 @@ class MainPageState extends State<MainPage> {
                 // 打开文件并切换到编辑器
                 setState(() {
                   _showProjectDetail = false;
+                  _currentFilePath = filePath;
+                  _currentIndex = 1; // 切换到编辑器页面
                 });
-                // 通知编辑器打开文件
               },
               onClose: _closeProjectDetail,
             )
           else if (_currentProjectPath != null)
-            CodeEditorPage(projectPath: _currentProjectPath)
+            CodeEditorPage(
+              projectPath: _currentProjectPath,
+              filePath: _currentFilePath,
+            )
           else
             const CodeEditorPage(),
           // 其他页面保持不变

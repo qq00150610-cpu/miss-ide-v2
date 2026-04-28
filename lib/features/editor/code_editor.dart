@@ -110,6 +110,19 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
     _scrollController.addListener(_syncLineNumberScroll);
   }
 
+  @override
+  void didUpdateWidget(CodeEditorPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // 当 filePath 变化时，加载新文件
+    if (widget.filePath != oldWidget.filePath && widget.filePath != null) {
+      _loadFile(widget.filePath!);
+    }
+    // 当 projectPath 变化时更新
+    if (widget.projectPath != oldWidget.projectPath) {
+      _currentProjectPath = widget.projectPath;
+    }
+  }
+
   /// 同步行号和编辑器滚动
   void _syncLineNumberScroll() {
     if (_lineNumberScrollController.hasClients) {

@@ -138,6 +138,7 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
                         final isActive = index == _currentTabIndex;
                         return GestureDetector(
                           onTap: () => _switchTab(index),
+                          onLongPress: () => _showTabContextMenu(context, index),
                           child: Container(
                             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                             decoration: BoxDecoration(
@@ -689,6 +690,267 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(message), backgroundColor: Colors.red),
     );
+  }
+
+  /// 显示标签页上下文菜单
+  void _showTabContextMenu(BuildContext context, int tabIndex) {
+    final RenderBox overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
+    final RenderBox button = context.findRenderObject() as RenderBox;
+    final Offset position = button.localToGlobal(Offset.zero, ancestor: overlay);
+    
+    showMenu<String>(
+      context: context,
+      position: RelativeRect.fromRect(
+        Rect.fromLTWH(position.dx, position.dy, button.size.width, button.size.height),
+        Offset.zero & overlay.size,
+      ),
+      items: [
+        const PopupMenuItem(
+          value: 'close',
+          child: Row(
+            children: [
+              Icon(Icons.close, size: 18),
+              SizedBox(width: 12),
+              Text('关闭当前文件'),
+            ],
+          ),
+        ),
+        const PopupMenuItem(
+          value: 'close_all',
+          child: Row(
+            children: [
+              Icon(Icons.close_fullscreen, size: 18),
+              SizedBox(width: 12),
+              Text('关闭所有文件'),
+            ],
+          ),
+        ),
+        const PopupMenuItem(
+          value: 'close_others',
+          child: Row(
+            children: [
+              Icon(Icons.filter_alt_off, size: 18),
+              SizedBox(width: 12),
+              Text('关闭其他文件'),
+            ],
+          ),
+        ),
+      ],
+    ).then((value) {
+      if (value != null) {
+        _handleTabMenuAction(value, tabIndex);
+      }
+    });
+  }
+
+  /// 处理标签页菜单操作
+  void _handleTabMenuAction(String action, int tabIndex) {
+    switch (action) {
+      case 'close':
+        _closeTab(tabIndex);
+        break;
+      case 'close_all':
+        _closeAllTabs();
+        break;
+      case 'close_others':
+        _closeOtherTabs(tabIndex);
+        break;
+    }
+  }
+
+  /// 关闭指定标签页
+  void _closeTab(int index) {
+    if (index < 0 || index >= _tabs.length) return;
+    
+    final tab = _tabs[index];
+    
+    // 如果有未保存的更改，提示用户
+    if (tab.hasChanges) {
+      showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('文件未保存'),
+          content: Text('${tab.fileName} 有未保存的更改，是否保存？'),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context);
+                _removeTab(index);
+              },
+              child: const Text('不保存'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: () async {
+                Navigator.pop(context);
+                // 保存并关闭
+                if (index < _tabs.length) {
+                  _switchTab(index);
+                  await _saveCurrentFile();
+                  _removeTab(index);
+                }
+              },
+              child: const Text('保存'),
+            ),
+          ],
+        ),
+      );
+    } else {
+      _removeTab(index);
+    }
+  }
+
+  /// 移除标签页
+  void _removeTab(int index) {
+    if (index < 0 || index >= _tabs.length) return;
+    
+    setState(() {
+      _tabs.removeAt(index);
+      if (_tabs.isEmpty) {
+        _currentTabIndex = 0;
+        _controller.clear();
+        _currentFilePath = '';
+        _currentLanguage = 'Text';
+        _hasChanges = false;
+      } else {
+        if (_currentTabIndex >= _tabs.length) {
+          _currentTabIndex = _tabs.length - 1;
+        }
+        _controller.text = _tabs[_currentTabIndex].content;
+        _currentFilePath = _tabs[_currentTabIndex].path;
+        _currentLanguage = _getLanguage(_tabs[_currentTabIndex].fileName);
+        _hasChanges = _tabs[_currentTabIndex].hasChanges;
+      }
+    });
+  }
+
+  /// 关闭所有标签页
+  void _closeAllTabs() {
+    // 检查是否有未保存的文件
+    final unsavedTabs = _tabs.where((t) => t.hasChanges).toList();
+    
+    if (unsavedTabs.isNotEmpty) {
+      showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('多个文件未保存'),
+          content: Text('有 ${unsavedTabs.length} 个文件有未保存的更改。\n是否全部保存？'),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context);
+                _removeAllTabs(false);
+              },
+              child: const Text('不保存全部'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: () async {
+                Navigator.pop(context);
+                // 保存所有文件
+                for (int i = 0; i < _tabs.length; i++) {
+                  if (_tabs[i].hasChanges && _tabs[i].path.isNotEmpty) {
+                    _switchTab(i);
+                    await _saveCurrentFile();
+                  }
+                }
+                _removeAllTabs(false);
+              },
+              child: const Text('保存全部'),
+            ),
+          ],
+        ),
+      );
+    } else {
+      _removeAllTabs(false);
+    }
+  }
+
+  /// 移除所有标签页
+  void _removeAllTabs(bool saveChanges) {
+    setState(() {
+      _tabs.clear();
+      _currentTabIndex = 0;
+      _controller.clear();
+      _currentFilePath = '';
+      _currentLanguage = 'Text';
+      _hasChanges = false;
+    });
+    _showSuccess('已关闭所有文件');
+  }
+
+  /// 关闭其他标签页
+  void _closeOtherTabs(int keepIndex) {
+    if (keepIndex < 0 || keepIndex >= _tabs.length) return;
+    
+    final keepTab = _tabs[keepIndex];
+    
+    // 检查其他标签是否有未保存的更改
+    final otherTabs = _tabs.where((t) => t.hasChanges && t != keepTab).toList();
+    
+    if (otherTabs.isNotEmpty) {
+      showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('文件未保存'),
+          content: Text('有 ${otherTabs.length} 个文件有未保存的更改。\n是否全部保存？'),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context);
+                _removeOtherTabs(keepIndex, false);
+              },
+              child: const Text('不保存'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: () async {
+                Navigator.pop(context);
+                // 保存其他文件
+                for (int i = 0; i < _tabs.length; i++) {
+                  if (i != keepIndex && _tabs[i].hasChanges && _tabs[i].path.isNotEmpty) {
+                    _switchTab(i);
+                    await _saveCurrentFile();
+                  }
+                }
+                _removeOtherTabs(keepIndex, false);
+              },
+              child: const Text('保存'),
+            ),
+          ],
+        ),
+      );
+    } else {
+      _removeOtherTabs(keepIndex, false);
+    }
+  }
+
+  /// 移除其他标签页
+  void _removeOtherTabs(int keepIndex, bool saveChanges) {
+    if (keepIndex < 0 || keepIndex >= _tabs.length) return;
+    
+    final keepTab = _tabs[keepIndex];
+    final newTabs = [keepTab];
+    
+    setState(() {
+      _tabs.clear();
+      _tabs.addAll(newTabs);
+      _currentTabIndex = 0;
+      _controller.text = keepTab.content;
+      _currentFilePath = keepTab.path;
+      _currentLanguage = _getLanguage(keepTab.fileName);
+      _hasChanges = keepTab.hasChanges;
+    });
+    _showSuccess('已关闭其他文件');
   }
 }
 

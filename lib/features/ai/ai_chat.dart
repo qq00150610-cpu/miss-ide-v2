@@ -43,6 +43,12 @@ class _AIChatPageState extends State<AIChatPage> {
   // 已保存的文件列表
   final List<SavedFile> _savedFiles = [];
 
+  // AI 修改授权机制 - 待处理的修改
+  PendingModification? _pendingModification;
+  
+  // 选中的文件列表（用于 AI 分析）
+  final List<String> _selectedFilesForAI = [];
+
   @override
   void initState() {
     super.initState();
@@ -335,6 +341,13 @@ class _AIChatPageState extends State<AIChatPage> {
                     ),
                     const SizedBox(width: 8),
                     _buildQuickActionChip(
+                      icon: Icons.file_open,
+                      label: '选择文件',
+                      color: Colors.teal,
+                      onTap: _onSelectFiles,
+                    ),
+                    const SizedBox(width: 8),
+                    _buildQuickActionChip(
                       icon: Icons.bug_report,
                       label: '调试代码',
                       color: Colors.red,
@@ -498,6 +511,80 @@ class _AIChatPageState extends State<AIChatPage> {
                   ),
                 ),
                 const SizedBox(height: 8),
+                // 已选文件区域
+                if (_selectedFilesForAI.isNotEmpty || _pendingModification != null)
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 8),
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.surfaceVariant,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (_selectedFilesForAI.isNotEmpty) ...[
+                          Row(
+                            children: [
+                              Icon(Icons.folder_open, size: 16, color: Colors.teal.shade700),
+                              const SizedBox(width: 8),
+                              Text(
+                                '已选文件 (${_selectedFilesForAI.length})',
+                                style: TextStyle(fontSize: 12, color: Colors.teal.shade700),
+                              ),
+                              const Spacer(),
+                              TextButton(
+                                onPressed: _showSelectedFilesDialog,
+                                child: Text('查看', style: TextStyle(fontSize: 10)),
+                              ),
+                              IconButton(
+                                icon: const Icon(Icons.clear, size: 16),
+                                onPressed: () => setState(() => _selectedFilesForAI.clear()),
+                                padding: EdgeInsets.zero,
+                                constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
+                              ),
+                            ],
+                          ),
+                        ],
+                        // 待处理修改提示
+                        if (_pendingModification != null)
+                          Container(
+                            margin: const EdgeInsets.only(top: 8),
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: Colors.orange.shade50,
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: Colors.orange.shade200),
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(Icons.pending_actions, size: 16, color: Colors.orange.shade700),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        '待应用的修改: ${_pendingModification!.filePath}',
+                                        style: TextStyle(fontSize: 11, color: Colors.orange.shade700),
+                                      ),
+                                      Text(
+                                        '请审阅后决定是否应用',
+                                        style: TextStyle(fontSize: 10, color: Colors.orange.shade500),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                TextButton(
+                                  onPressed: _showModificationDialog,
+                                  child: Text('查看', style: TextStyle(fontSize: 10)),
+                                ),
+                              ],
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
                 // 代码粘贴区（可折叠）
                 if (_pastedCode != null)
                   Container(
@@ -528,6 +615,14 @@ class _AIChatPageState extends State<AIChatPage> {
                   ),
                 Row(
                   children: [
+                    // 选择文件按钮
+                    if (widget.projectPath != null)
+                      IconButton(
+                        icon: const Icon(Icons.file_open),
+                        onPressed: _onSelectFiles,
+                        tooltip: '选择文件',
+                        color: _selectedFilesForAI.isNotEmpty ? Colors.teal : null,
+                      ),
                     Expanded(
                       child: TextField(
                         controller: _messageController,
@@ -541,6 +636,20 @@ class _AIChatPageState extends State<AIChatPage> {
                             horizontal: 16,
                             vertical: 8,
                           ),
+                          prefixIcon: _selectedFilesForAI.isNotEmpty
+                              ? Container(
+                                  margin: const EdgeInsets.symmetric(horizontal: 8),
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: Colors.teal.shade100,
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: Text(
+                                    '${_selectedFilesForAI.length}个文件',
+                                    style: TextStyle(fontSize: 10, color: Colors.teal.shade700),
+                                  ),
+                                )
+                              : null,
                           suffixIcon: IconButton(
                             icon: const Icon(Icons.paste),
                             onPressed: _pasteFromClipboard,
@@ -1826,6 +1935,247 @@ $text
       );
     }
   }
+
+  /// 选择文件进行AI分析
+  void _onSelectFiles() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) => _FileSelectionSheet(
+        projectPath: widget.projectPath,
+        selectedFiles: _selectedFilesForAI,
+        onConfirm: (selectedFiles) {
+          setState(() {
+            _selectedFilesForAI.clear();
+            _selectedFilesForAI.addAll(selectedFiles);
+          });
+        },
+      ),
+    );
+  }
+
+  /// 显示已选文件对话框
+  void _showSelectedFilesDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            const Icon(Icons.folder_open, color: Colors.teal),
+            const SizedBox(width: 8),
+            Text('已选文件 (${_selectedFilesForAI.length})'),
+          ],
+        ),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: _selectedFilesForAI.isEmpty
+              ? const Center(child: Text('未选择任何文件'))
+              : ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: _selectedFilesForAI.length,
+                  itemBuilder: (context, index) {
+                    final filePath = _selectedFilesForAI[index];
+                    return ListTile(
+                      leading: Icon(_getFileIcon(p.extension(filePath).replaceFirst('.', ''))),
+                      title: Text(p.basename(filePath)),
+                      subtitle: Text(filePath, style: const TextStyle(fontSize: 10)),
+                      trailing: IconButton(
+                        icon: const Icon(Icons.remove_circle_outline, color: Colors.red),
+                        onPressed: () {
+                          setState(() {
+                            _selectedFilesForAI.removeAt(index);
+                          });
+                          Navigator.pop(context);
+                          if (_selectedFilesForAI.isNotEmpty) {
+                            _showSelectedFilesDialog();
+                          }
+                        },
+                      ),
+                    );
+                  },
+                ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              setState(() => _selectedFilesForAI.clear());
+              Navigator.pop(context);
+            },
+            child: const Text('清空'),
+          ),
+          FilledButton(
+            onPressed: () {
+              Navigator.pop(context);
+              // 自动填充提示词
+              if (_selectedFilesForAI.isNotEmpty) {
+                final fileNames = _selectedFilesForAI.map((f) => p.basename(f)).join(', ');
+                _messageController.text = '请检查并修正以下文件的代码问题：$fileNames';
+              }
+            },
+            child: const Text('询问AI'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('关闭'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 显示待处理修改对话框
+  void _showModificationDialog() {
+    if (_pendingModification == null) return;
+    
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            const Icon(Icons.pending_actions, color: Colors.orange),
+            const SizedBox(width: 8),
+            const Text('待应用的修改'),
+          ],
+        ),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  '文件: ${_pendingModification!.filePath}',
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                const Divider(),
+                const SizedBox(height: 8),
+                const Text(
+                  '修改说明:',
+                  style: TextStyle(fontWeight: FontWeight.w500),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  _pendingModification!.description,
+                  style: const TextStyle(fontSize: 12),
+                ),
+                const SizedBox(height: 16),
+                const Text(
+                  '修改内容:',
+                  style: TextStyle(fontWeight: FontWeight.w500),
+                ),
+                const SizedBox(height: 8),
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade100,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: SelectableText(
+                    _pendingModification!.newContent,
+                    style: const TextStyle(
+                      fontFamily: 'monospace',
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              setState(() => _pendingModification = null);
+              Navigator.pop(context);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('已拒绝修改')),
+              );
+            },
+            child: const Text('拒绝'),
+          ),
+          OutlinedButton(
+            onPressed: () async {
+              Navigator.pop(context);
+              // 复制修改内容到剪贴板
+              Clipboard.setData(ClipboardData(text: _pendingModification!.newContent));
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('修改内容已复制到剪贴板')),
+              );
+            },
+            child: const Text('复制'),
+          ),
+          FilledButton(
+            onPressed: () async {
+              Navigator.pop(context);
+              await _applyModification();
+            },
+            child: const Text('应用修改'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 应用待处理的修改
+  Future<void> _applyModification() async {
+    if (_pendingModification == null) return;
+    
+    try {
+      final result = await fileOperationService.editFile(
+        _pendingModification!.filePath,
+        _pendingModification!.newContent,
+      );
+      
+      if (result.success) {
+        setState(() => _pendingModification = null);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('文件已修改: ${_pendingModification!.filePath}'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('修改失败: ${result.error}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('应用修改时出错: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  /// 保存AI响应中的代码块为待处理修改
+  void _saveCodeAsPendingModification(String filePath, String description, String code) {
+    setState(() {
+      _pendingModification = PendingModification(
+        filePath: filePath,
+        description: description,
+        newContent: code,
+        createdAt: DateTime.now(),
+      );
+    });
+    
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('检测到修改建议，请审阅后决定是否应用'),
+        backgroundColor: Colors.orange,
+        action: SnackBarAction(
+          label: '查看',
+          onPressed: _showModificationDialog,
+        ),
+      ),
+    );
+  }
 }
 
 /// AI命令类型
@@ -1871,6 +2221,325 @@ class SavedFile {
     required this.extension,
     required this.savedAt,
   });
+}
+
+/// 待处理的修改
+class PendingModification {
+  final String filePath;
+  final String description;
+  final String newContent;
+  final DateTime createdAt;
+  
+  PendingModification({
+    required this.filePath,
+    required this.description,
+    required this.newContent,
+    required this.createdAt,
+  });
+}
+
+/// 文件选择底部弹窗
+class _FileSelectionSheet extends StatefulWidget {
+  final String? projectPath;
+  final List<String> selectedFiles;
+  final Function(List<String>) onConfirm;
+  
+  const _FileSelectionSheet({
+    this.projectPath,
+    required this.selectedFiles,
+    required this.onConfirm,
+  });
+
+  @override
+  State<_FileSelectionSheet> createState() => _FileSelectionSheetState();
+}
+
+class _FileSelectionSheetState extends State<_FileSelectionSheet> {
+  final Set<String> _selectedFiles = {};
+  List<FileSystemEntity> _files = [];
+  bool _isLoading = true;
+  String? _currentPath;
+  
+  @override
+  void initState() {
+    super.initState();
+    _selectedFiles.addAll(widget.selectedFiles);
+    _currentPath = widget.projectPath;
+    _loadFiles();
+  }
+  
+  Future<void> _loadFiles() async {
+    if (_currentPath == null) {
+      setState(() {
+        _files = [];
+        _isLoading = false;
+      });
+      return;
+    }
+    
+    try {
+      final dir = Directory(_currentPath!);
+      final entities = await dir.list().toList();
+      
+      entities.sort((a, b) {
+        if (a is Directory && b is! Directory) return -1;
+        if (a is! Directory && b is Directory) return 1;
+        return p.basename(a.path).compareTo(p.basename(b.path));
+      });
+      
+      setState(() {
+        _files = entities.where((e) {
+          final name = p.basename(e.path);
+          return !name.startsWith('.');
+        }).toList();
+        _isLoading = false;
+      });
+    } catch (e) {
+      setState(() {
+        _files = [];
+        _isLoading = false;
+      });
+    }
+  }
+  
+  @override
+  Widget build(BuildContext context) {
+    return DraggableScrollableSheet(
+      initialChildSize: 0.7,
+      minChildSize: 0.5,
+      maxChildSize: 0.95,
+      expand: false,
+      builder: (context, scrollController) {
+        return Container(
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.surface,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+          ),
+          child: Column(
+            children: [
+              // 标题栏
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  border: Border(
+                    bottom: BorderSide(color: Theme.of(context).dividerColor),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.folder_open),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            '选择文件',
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          if (_currentPath != null)
+                            Text(
+                              _currentPath!,
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                        ],
+                      ),
+                    ),
+                    Text(
+                      '已选 ${_selectedFiles.length} 个',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: _selectedFiles.isNotEmpty ? Colors.teal : null,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              
+              // 路径导航
+              if (_currentPath != null)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  child: Row(
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.arrow_upward, size: 20),
+                        onPressed: () {
+                          final parent = Directory(_currentPath!).parent.path;
+                          setState(() {
+                            _currentPath = parent;
+                            _isLoading = true;
+                          });
+                          _loadFiles();
+                        },
+                      ),
+                      Expanded(
+                        child: SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: Row(
+                            children: _buildPathBreadcrumbs(),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              
+              // 文件列表
+              Expanded(
+                child: _isLoading
+                    ? const Center(child: CircularProgressIndicator())
+                    : _files.isEmpty
+                        ? const Center(child: Text('空目录'))
+                        : ListView.builder(
+                            controller: scrollController,
+                            itemCount: _files.length,
+                            itemBuilder: (context, index) {
+                              final file = _files[index];
+                              final name = p.basename(file.path);
+                              final isDir = file is Directory;
+                              
+                              return ListTile(
+                                leading: isDir
+                                    ? const Icon(Icons.folder, color: Colors.amber)
+                                    : Icon(
+                                        _getFileIcon(p.extension(name).replaceFirst('.', '')),
+                                        color: _getFileColor(p.extension(name).replaceFirst('.', '')),
+                                      ),
+                                title: Text(name),
+                                subtitle: isDir ? const Text('文件夹', style: TextStyle(fontSize: 10)) : null,
+                                trailing: !isDir
+                                    ? Checkbox(
+                                        value: _selectedFiles.contains(file.path),
+                                        onChanged: (value) {
+                                          setState(() {
+                                            if (value == true) {
+                                              _selectedFiles.add(file.path);
+                                            } else {
+                                              _selectedFiles.remove(file.path);
+                                            }
+                                          });
+                                        },
+                                      )
+                                    : IconButton(
+                                        icon: const Icon(Icons.chevron_right),
+                                        onPressed: () {
+                                          setState(() {
+                                            _currentPath = file.path;
+                                            _isLoading = true;
+                                          });
+                                          _loadFiles();
+                                        },
+                                      ),
+                                onTap: isDir
+                                    ? () {
+                                        setState(() {
+                                          _currentPath = file.path;
+                                          _isLoading = true;
+                                        });
+                                        _loadFiles();
+                                      }
+                                    : () {
+                                        setState(() {
+                                          if (_selectedFiles.contains(file.path)) {
+                                            _selectedFiles.remove(file.path);
+                                          } else {
+                                            _selectedFiles.add(file.path);
+                                          }
+                                        });
+                                      },
+                              );
+                            },
+                          ),
+              ),
+              
+              // 底部按钮
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  border: Border(
+                    top: BorderSide(color: Theme.of(context).dividerColor),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () => Navigator.pop(context),
+                        child: const Text('取消'),
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: FilledButton(
+                        onPressed: () {
+                          widget.onConfirm(_selectedFiles.toList());
+                          Navigator.pop(context);
+                        },
+                        child: Text('确定 (${_selectedFiles.length})'),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+  
+  List<Widget> _buildPathBreadcrumbs() {
+    if (_currentPath == null) return [];
+    
+    final parts = _currentPath!.split('/');
+    final widgets = <Widget>[];
+    
+    for (int i = 0; i < parts.length; i++) {
+      if (i > 0) {
+        widgets.add(const Icon(Icons.chevron_right, size: 16));
+      }
+      widgets.add(
+        InkWell(
+          onTap: () {
+            final newPath = parts.sublist(0, i + 1).join('/');
+            setState(() {
+              _currentPath = newPath;
+              _isLoading = true;
+            });
+            _loadFiles();
+          },
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              color: i == parts.length - 1
+                  ? Theme.of(context).colorScheme.primaryContainer
+                  : null,
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: Text(
+              parts[i].isEmpty ? '/' : parts[i],
+              style: TextStyle(
+                fontSize: 12,
+                color: i == parts.length - 1
+                    ? Theme.of(context).colorScheme.onPrimaryContainer
+                    : null,
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+    
+    return widgets;
+  }
 }
 
 /// 创建项目底部弹窗

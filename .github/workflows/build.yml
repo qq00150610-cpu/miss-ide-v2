@@ -71,96 +71,90 @@ jobs:
       - name: Increment Version
         id: version
         run: |
-          #!/bin/bash
-          CURRENT_VERSION=${{ steps.current_version.outputs.current_version }}
-          VERSION_TYPE="${inputs.version_type:-build}"
+          CURRENT_VERSION="${{ steps.current_version.outputs.current_version }}"
+          VERSION_TYPE="${{ inputs.version_type }}"
+          
+          if [ -z "$VERSION_TYPE" ]; then
+            VERSION_TYPE="build"
+          fi
           
           echo "当前版本: $CURRENT_VERSION"
           echo "版本类型: $VERSION_TYPE"
           
-          # 使用 Python 进行版本解析和递增（更可靠）
-          python3 << 'PYTHON_SCRIPT'
-          import sys
-          import re
+          # 使用 Python 进行版本解析和递增
+          python3 -c "
+import os
+import re
+
+version_str = '''$CURRENT_VERSION'''.strip()
+version_type = '''$VERSION_TYPE'''.strip() or 'build'
+
+print(f'解析版本: {version_str}')
+
+# 解析版本号格式: major.minor.patch+buildNumber
+match = re.match(r'(\d+)\.(\d+)\.(\d+)\+(\d+)', version_str)
+if match:
+    major, minor, patch, build = map(int, match.groups())
+else:
+    match = re.match(r'(\d+)\.(\d+)\.(\d+)', version_str)
+    if match:
+        major, minor, patch = map(int, match.groups())
+        build = 0
+    else:
+        major, minor, patch, build = 2, 0, 0, 1
+
+print(f'解析结果: major={major}, minor={minor}, patch={patch}, build={build}')
+
+# 根据版本类型递增
+if version_type == 'build':
+    new_build = build + 1
+    new_patch = patch
+    new_minor = minor
+    new_major = major
+elif version_type == 'patch':
+    new_build = 1
+    new_patch = patch + 1
+    new_minor = minor
+    new_major = major
+elif version_type == 'minor':
+    new_build = 1
+    new_patch = 0
+    new_minor = minor + 1
+    new_major = major
+elif version_type == 'major':
+    new_build = 1
+    new_patch = 0
+    new_minor = 0
+    new_major = major + 1
+else:
+    new_build = build + 1
+    new_patch = patch
+    new_minor = minor
+    new_major = major
+
+new_version = f'{new_major}.{new_minor}.{new_patch}+{new_build}'
+tag = f'v{new_major}.{new_minor}.{new_patch}'
+
+print(f'新版本: {new_version}')
+print(f'Tag: {tag}')
+
+# 输出到 GitHub Actions
+with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+    f.write(f'new_version={new_version}\n')
+    f.write(f'tag={tag}\n')
+
+# 更新 pubspec.yaml
+with open('pubspec.yaml', 'r') as f:
+    content = f.read()
+
+content = re.sub(r'^version:.*', f'version: {new_version}', content, flags=re.MULTILINE)
+
+with open('pubspec.yaml', 'w') as f:
+    f.write(content)
+
+print('✓ pubspec.yaml 已更新')
+"
           
-          version_str = """${{ steps.current_version.outputs.current_version }}""".strip()
-          version_type = """${{ inputs.version_type }}""".strip() or "build"
-          
-          print(f"解析版本: {version_str}")
-          
-          # 解析版本号格式: major.minor.patch+buildNumber
-          match = re.match(r'(\d+)\.(\d+)\.(\d+)\+(\d+)', version_str)
-          if match:
-              major, minor, patch, build = map(int, match.groups())
-          else:
-              # 尝试其他格式
-              match = re.match(r'(\d+)\.(\d+)\.(\d+)', version_str)
-              if match:
-                  major, minor, patch = map(int, match.groups())
-                  build = 0
-              else:
-                  major, minor, patch, build = 2, 0, 0, 1
-          
-          print(f"解析结果: major={major}, minor={minor}, patch={patch}, build={build}")
-          
-          # 根据版本类型递增
-          if version_type == "build":
-              new_build = build + 1
-              new_patch = patch
-              new_minor = minor
-              new_major = major
-          elif version_type == "patch":
-              new_build = 1
-              new_patch = patch + 1
-              new_minor = minor
-              new_major = major
-          elif version_type == "minor":
-              new_build = 1
-              new_patch = 0
-              new_minor = minor + 1
-              new_major = major
-          elif version_type == "major":
-              new_build = 1
-              new_patch = 0
-              new_minor = 0
-              new_major = major + 1
-          else:
-              new_build = build + 1
-              new_patch = patch
-              new_minor = minor
-              new_major = major
-          
-          new_version = f"{new_major}.{new_minor}.{new_patch}+{new_build}"
-          tag = f"v{new_major}.{new_minor}.{new_patch}"
-          
-          print(f"新版本: {new_version}")
-          print(f"Tag: {tag}")
-          
-          # 输出到 GitHub Actions
-          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
-              f.write(f"new_version={new_version}\n")
-              f.write(f"tag={tag}\n")
-          
-          # 更新 pubspec.yaml
-          with open('pubspec.yaml', 'r') as f:
-              content = f.read()
-          
-          content = re.sub(r'^version:.*', f'version: {new_version}', content, flags=re.MULTILINE)
-          
-          with open('pubspec.yaml', 'w') as f:
-              f.write(content)
-          
-          print("✓ pubspec.yaml 已更新")
-          
-          import os
-          os.environ['NEW_VERSION'] = new_version
-          os.environ['TAG'] = tag
-          PYTHON_SCRIPT
-          
-          echo "新版本: $NEW_VERSION"
-          echo "Tag: $TAG"
-          echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
-          echo "tag=$TAG" >> $GITHUB_OUTPUT
           grep "^version:" pubspec.yaml
       
       - name: Build APK

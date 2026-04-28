@@ -234,7 +234,7 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
                             // 行号面板
                             Container(
                               width: 50,
-                              color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                              color: Theme.of(context).colorScheme.surfaceVariant,
                               child: ListView.builder(
                                 controller: _lineNumberScrollController,
                                 physics: const BouncingScrollPhysics(),

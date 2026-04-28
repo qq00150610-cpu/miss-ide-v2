@@ -441,7 +441,6 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
               readOnly: false,
               maxLines: null,
               expands: false,
-              softWrap: true, // 启用自动换行
               keyboardType: TextInputType.multiline,
               textInputAction: TextInputAction.newline,
               scrollPhysics: const NeverScrollableScrollPhysics(),
@@ -472,7 +471,6 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
         readOnly: false,
         maxLines: null,
         expands: false,
-        softWrap: true, // 启用自动换行
         keyboardType: TextInputType.multiline,
         textInputAction: TextInputAction.newline,
         scrollPhysics: const NeverScrollableScrollPhysics(),

@@ -3,9 +3,6 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../ai/ai_service.dart';
 import '../build/build_service.dart';
-import '../version/version_service.dart';
-import '../version/version_history.dart';
-import '../version/version_page.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -17,8 +14,6 @@ class SettingsPage extends StatefulWidget {
 class _SettingsPageState extends State<SettingsPage> {
   bool _darkMode = false;
   String _githubTokenStatus = '未配置';
-  String _currentVersion = '加载中...';
-  int _releaseCount = 0;
   final _storage = const FlutterSecureStorage();
 
   final List<Map<String, String>> _aiModels = [
@@ -38,21 +33,6 @@ class _SettingsPageState extends State<SettingsPage> {
     super.initState();
     _initService();
     _loadGitHubTokenStatus();
-    _loadVersionInfo();
-  }
-
-  Future<void> _loadVersionInfo() async {
-    await versionService.loadFromPubspec();
-    await versionHistoryService.init();
-    
-    final releases = await versionHistoryService.getReleases();
-    
-    if (mounted) {
-      setState(() {
-        _currentVersion = versionService.currentVersion.displayVersion;
-        _releaseCount = releases.length;
-      });
-    }
   }
 
   Future<void> _loadGitHubTokenStatus() async {
@@ -176,40 +156,10 @@ class _SettingsPageState extends State<SettingsPage> {
           _buildSection(
             '关于',
             [
-              ListTile(
-                leading: const Icon(Icons.info),
-                title: const Text('版本'),
-                subtitle: Text(_currentVersion),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => const VersionHistoryPage(),
-                    ),
-                  ).then((_) => _loadVersionInfo());
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.history),
-                title: const Text('版本历史'),
-                subtitle: Text('$_releaseCount 个发布版本'),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => const VersionHistoryPage(),
-                    ),
-                  ).then((_) => _loadVersionInfo());
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.download),
-                title: const Text('下载历史版本'),
-                subtitle: const Text('查看所有 GitHub Releases'),
-                trailing: const Icon(Icons.open_in_new),
-                onTap: () => _launchUrl(versionService.releasesPageUrl),
+              const ListTile(
+                leading: Icon(Icons.info),
+                title: Text('版本'),
+                subtitle: Text('Miss IDE v2.0.0'),
               ),
               ListTile(
                 leading: const Icon(Icons.code),
@@ -217,7 +167,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 onTap: () => showLicensePage(
                   context: context,
                   applicationName: 'Miss IDE',
-                  applicationVersion: versionService.currentVersion.versionString,
+                  applicationVersion: '2.0.0',
                 ),
               ),
             ],

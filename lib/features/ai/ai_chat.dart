@@ -60,8 +60,6 @@ class _AIChatPageState extends State<AIChatPage> {
     _initService();
     // 设置AI回调
     aiService.onCodeGenerated = _onCodeGenerated;
-    // 设置 API Key 验证回调
-    aiService.onApiKeyValidated = _onApiKeyValidated;
     // 初始化文件操作服务
     if (widget.projectPath != null) {
       fileOperationService.setProjectPath(widget.projectPath);
@@ -95,20 +93,6 @@ class _AIChatPageState extends State<AIChatPage> {
       _pendingCode = code;
       _pendingLanguage = language;
     });
-  }
-
-  void _onApiKeyValidated(bool isValid) {
-    if (mounted) {
-      setState(() {});
-      if (!isValid) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('${aiService.selectedModel} API Key 无效，请检查'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    }
   }
 
   @override

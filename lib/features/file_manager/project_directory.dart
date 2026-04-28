@@ -28,12 +28,21 @@ class ProjectDirectoryPanel extends StatefulWidget {
   final String projectPath;
   final Function(String) onFileSelected;
   final FileOperationCallback? onFileOperation;
+  /// 文件操作回调 - 用于长按菜单
+  final Function(String action, String? currentFilePath)? onTabOperation;
+  /// 当前打开的文件路径（用于"关闭当前文件"功能）
+  final String? currentOpenFilePath;
+  /// 所有打开的标签页文件路径列表
+  final List<String>? openFilePaths;
 
   const ProjectDirectoryPanel({
     super.key,
     required this.projectPath,
     required this.onFileSelected,
     this.onFileOperation,
+    this.onTabOperation,
+    this.currentOpenFilePath,
+    this.openFilePaths,
   });
 
   @override
@@ -149,28 +158,31 @@ class _ProjectDirectoryPanelState extends State<ProjectDirectoryPanel> {
     final indent = level * 16.0;
 
     if (item.isDirectory) {
-      return ExpansionTile(
-        tilePadding: EdgeInsets.only(left: indent, right: 8),
-        leading: Icon(
-          item.isExpanded ? Icons.folder_open : Icons.folder,
-          size: 18,
-          color: Colors.amber,
+      return InkWell(
+        onLongPress: () => _showDirectoryContextMenu(context, item),
+        child: ExpansionTile(
+          tilePadding: EdgeInsets.only(left: indent, right: 8),
+          leading: Icon(
+            item.isExpanded ? Icons.folder_open : Icons.folder,
+            size: 18,
+            color: Colors.amber,
+          ),
+          title: Text(
+            item.name,
+            style: const TextStyle(fontSize: 12),
+          ),
+          onExpansionChanged: (expanded) async {
+            if (expanded && item.children.isEmpty) {
+              final children = await _readDirectory(item.path);
+              setState(() {
+                item.children.clear();
+                item.children.addAll(children);
+                item.isExpanded = true;
+              });
+            }
+          },
+          children: item.children.map((child) => _buildTreeItem(child, level + 1)).toList(),
         ),
-        title: Text(
-          item.name,
-          style: const TextStyle(fontSize: 12),
-        ),
-        onExpansionChanged: (expanded) async {
-          if (expanded && item.children.isEmpty) {
-            final children = await _readDirectory(item.path);
-            setState(() {
-              item.children.clear();
-              item.children.addAll(children);
-              item.isExpanded = true;
-            });
-          }
-        },
-        children: item.children.map((child) => _buildTreeItem(child, level + 1)).toList(),
       );
     } else {
       return InkWell(
@@ -194,6 +206,150 @@ class _ProjectDirectoryPanelState extends State<ProjectDirectoryPanel> {
         ),
       );
     }
+  }
+
+  /// 显示目录上下文菜单
+  void _showDirectoryContextMenu(BuildContext context, FileTreeItem item) {
+    final RenderBox overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
+    final RenderBox button = context.findRenderObject() as RenderBox;
+    final Offset position = button.localToGlobal(Offset.zero, ancestor: overlay);
+    
+    // 检查是否有打开的文件
+    final hasOpenFiles = widget.openFilePaths != null && widget.openFilePaths!.isNotEmpty;
+    final hasCurrentFile = widget.currentOpenFilePath != null && widget.currentOpenFilePath!.isNotEmpty;
+    
+    final menuItems = <PopupMenuEntry<String>>[
+      if (hasOpenFiles) ...[
+        PopupMenuItem(
+          value: 'close',
+          child: Row(
+            children: [
+              const Icon(Icons.close, size: 18),
+              const SizedBox(width: 12),
+              Text(hasCurrentFile ? '关闭当前文件' : '关闭文件'),
+            ],
+          ),
+        ),
+        PopupMenuItem(
+          value: 'close_all',
+          child: Row(
+            children: [
+              const Icon(Icons.close_fullscreen, size: 18),
+              const SizedBox(width: 12),
+              const Text('关闭所有文件'),
+            ],
+          ),
+        ),
+        if (hasOpenFiles && widget.openFilePaths!.length > 1)
+          PopupMenuItem(
+            value: 'close_others',
+            child: Row(
+              children: [
+                const Icon(Icons.filter_alt_off, size: 18),
+                const SizedBox(width: 12),
+                const Text('关闭其他文件'),
+              ],
+            ),
+          ),
+        const PopupMenuDivider(),
+      ],
+      const PopupMenuItem(
+        value: 'refresh',
+        child: Row(
+          children: [
+            Icon(Icons.refresh, size: 18),
+            SizedBox(width: 12),
+            Text('刷新目录'),
+          ],
+        ),
+      ),
+      const PopupMenuItem(
+        value: 'expand_all',
+        child: Row(
+          children: [
+            Icon(Icons.unfold_more, size: 18),
+            SizedBox(width: 12),
+            Text('展开全部'),
+          ],
+        ),
+      ),
+      const PopupMenuItem(
+        value: 'collapse_all',
+        child: Row(
+          children: [
+            Icon(Icons.unfold_less, size: 18),
+            SizedBox(width: 12),
+            Text('折叠全部'),
+          ],
+        ),
+      ),
+    ];
+    
+    showMenu<String>(
+      context: context,
+      position: RelativeRect.fromRect(
+        Rect.fromLTWH(position.dx, position.dy, button.size.width, button.size.height),
+        Offset.zero & overlay.size,
+      ),
+      items: menuItems,
+    ).then((value) {
+      if (value != null) {
+        _handleDirectoryMenuAction(value, item);
+      }
+    });
+  }
+
+  /// 处理目录菜单操作
+  void _handleDirectoryMenuAction(String action, FileTreeItem item) {
+    switch (action) {
+      case 'close':
+        // 关闭当前文件
+        if (widget.currentOpenFilePath != null) {
+          widget.onTabOperation?.call('close', widget.currentOpenFilePath);
+        }
+        break;
+      case 'close_all':
+        // 关闭所有文件
+        widget.onTabOperation?.call('close_all', null);
+        break;
+      case 'close_others':
+        // 关闭其他文件
+        widget.onTabOperation?.call('close_others', widget.currentOpenFilePath);
+        break;
+      case 'refresh':
+        _loadDirectory();
+        break;
+      case 'expand_all':
+        _expandAllDirectories(item);
+        break;
+      case 'collapse_all':
+        _collapseAllDirectories(item);
+        break;
+    }
+  }
+
+  /// 展开所有目录
+  void _expandAllDirectories(FileTreeItem item) async {
+    if (item.isDirectory && !item.isExpanded) {
+      final children = await _readDirectory(item.path);
+      setState(() {
+        item.children.clear();
+        item.children.addAll(children);
+        item.isExpanded = true;
+      });
+    }
+    for (var child in item.children) {
+      _expandAllDirectories(child);
+    }
+  }
+
+  /// 折叠所有目录
+  void _collapseAllDirectories(FileTreeItem item) {
+    item.isExpanded = false;
+    for (var child in item.children) {
+      _collapseAllDirectories(child);
+    }
+    setState(() {});
   }
 
   /// 显示文件上下文菜单

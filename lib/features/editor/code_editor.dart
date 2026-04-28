@@ -118,6 +118,9 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
                 ? ProjectDirectoryPanel(
                     projectPath: _currentProjectPath!,
                     onFileSelected: _onFileSelectedFromDirectory,
+                    onTabOperation: _handleTabOperation,
+                    currentOpenFilePath: _tabs.isNotEmpty ? _tabs[_currentTabIndex].path : null,
+                    openFilePaths: _tabs.map((t) => t.path).toList(),
                   )
                 : const SizedBox.shrink(),
           ),
@@ -678,6 +681,34 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
 
   void _onFileSelectedFromDirectory(String filePath) {
     _loadFile(filePath);
+  }
+
+  /// 处理来自目录面板的标签页操作
+  void _handleTabOperation(String action, String? currentFilePath) {
+    switch (action) {
+      case 'close':
+        // 关闭当前文件
+        if (currentFilePath != null) {
+          final index = _tabs.indexWhere((t) => t.path == currentFilePath);
+          if (index >= 0) {
+            _closeTab(index);
+          }
+        }
+        break;
+      case 'close_all':
+        // 关闭所有文件
+        _closeAllTabs();
+        break;
+      case 'close_others':
+        // 关闭其他文件
+        if (currentFilePath != null) {
+          final index = _tabs.indexWhere((t) => t.path == currentFilePath);
+          if (index >= 0) {
+            _closeOtherTabs(index);
+          }
+        }
+        break;
+    }
   }
 
   void _showSuccess(String message) {

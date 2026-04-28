@@ -612,6 +612,14 @@ class _AIChatPageState extends State<AIChatPage> {
                         tooltip: '选择文件',
                         color: _selectedFilesForAI.isNotEmpty ? Colors.teal : null,
                       ),
+                    // 检查文件按钮 - 专门用于AI检查代码
+                    if (widget.projectPath != null)
+                      IconButton(
+                        icon: const Icon(Icons.search),
+                        onPressed: _onCheckFiles,
+                        tooltip: '检查文件',
+                        color: Colors.orange,
+                      ),
                     Expanded(
                       child: TextField(
                         controller: _messageController,
@@ -1947,6 +1955,30 @@ $text
     );
   }
 
+  /// 选择文件进行AI代码检查
+  void _onCheckFiles() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) => _FileCheckSelectionSheet(
+        projectPath: widget.projectPath,
+        selectedFiles: _selectedFilesForAI,
+        onConfirm: (selectedFiles) {
+          if (selectedFiles.isNotEmpty) {
+            setState(() {
+              _selectedFilesForAI.clear();
+              _selectedFilesForAI.addAll(selectedFiles);
+            });
+            // 自动填充提示词
+            final fileNames = selectedFiles.map((f) => p.basename(f)).join('\n- ');
+            _messageController.text = '请检查以下文件是否有问题：\n- $fileNames';
+            _focusNode.requestFocus();
+          }
+        },
+      ),
+    );
+  }
+
   /// 显示已选文件对话框
   void _showSelectedFilesDialog() {
     showDialog(
@@ -2684,5 +2716,463 @@ class _CreateProjectSheetState extends State<_CreateProjectSheet> {
         ],
       ),
     );
+  }
+}
+
+
+/// 文件检查选择底部弹窗（带代码预览）
+class _FileCheckSelectionSheet extends StatefulWidget {
+  final String? projectPath;
+  final List<String> selectedFiles;
+  final Function(List<String>) onConfirm;
+  
+  const _FileCheckSelectionSheet({
+    this.projectPath,
+    required this.selectedFiles,
+    required this.onConfirm,
+  });
+
+  @override
+  State<_FileCheckSelectionSheet> createState() => _FileCheckSelectionSheetState();
+}
+
+class _FileCheckSelectionSheetState extends State<_FileCheckSelectionSheet> {
+  final Set<String> _selectedFiles = {};
+  List<FileSystemEntity> _files = [];
+  bool _isLoading = true;
+  String? _currentPath;
+  Map<String, String> _fileContents = {};
+  
+  @override
+  void initState() {
+    super.initState();
+    _selectedFiles.addAll(widget.selectedFiles);
+    _currentPath = widget.projectPath;
+    _loadFiles();
+  }
+  
+  Future<void> _loadFiles() async {
+    if (_currentPath == null) {
+      setState(() {
+        _files = [];
+        _isLoading = false;
+      });
+      return;
+    }
+    
+    try {
+      final dir = Directory(_currentPath!);
+      final entities = await dir.list().toList();
+      
+      entities.sort((a, b) {
+        if (a is Directory && b is! Directory) return -1;
+        if (a is! Directory && b is Directory) return 1;
+        return p.basename(a.path).compareTo(p.basename(b.path));
+      });
+      
+      setState(() {
+        _files = entities.where((e) {
+          final name = p.basename(e.path);
+          return !name.startsWith('.');
+        }).toList();
+        _isLoading = false;
+      });
+    } catch (e) {
+      setState(() {
+        _files = [];
+        _isLoading = false;
+      });
+    }
+  }
+  
+  Future<void> _loadFileContent(String filePath) async {
+    try {
+      final file = File(filePath);
+      if (await file.exists()) {
+        final content = await file.readAsString();
+        setState(() {
+          _fileContents[filePath] = content.length > 5000 
+              ? '${content.substring(0, 5000)}\n\n... (内容过长，已截断)' 
+              : content;
+        });
+      }
+    } catch (e) {
+      debugPrint('Failed to load file: $e');
+    }
+  }
+  
+  @override
+  Widget build(BuildContext context) {
+    return DraggableScrollableSheet(
+      initialChildSize: 0.85,
+      minChildSize: 0.5,
+      maxChildSize: 0.95,
+      expand: false,
+      builder: (context, scrollController) {
+        return Container(
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.surface,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+          ),
+          child: Column(
+            children: [
+              // 标题栏
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  border: Border(
+                    bottom: BorderSide(color: Theme.of(context).dividerColor),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.search, color: Colors.orange),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            '选择要检查的文件',
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          Text(
+                            'AI将分析文件并提供修改建议',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Theme.of(context).colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Text(
+                      '已选 ${_selectedFiles.length} 个',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: _selectedFiles.isNotEmpty ? Colors.orange : null,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              
+              // 路径导航
+              if (_currentPath != null)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  child: Row(
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.arrow_upward, size: 20),
+                        onPressed: () {
+                          final parent = Directory(_currentPath!).parent.path;
+                          setState(() {
+                            _currentPath = parent;
+                            _isLoading = true;
+                          });
+                          _loadFiles();
+                        },
+                      ),
+                      Expanded(
+                        child: SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: Row(
+                            children: _buildPathBreadcrumbs(),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              
+              // 文件列表
+              Expanded(
+                child: _isLoading
+                    ? const Center(child: CircularProgressIndicator())
+                    : _files.isEmpty
+                        ? const Center(child: Text('空目录'))
+                        : ListView.builder(
+                            controller: scrollController,
+                            itemCount: _files.length,
+                            itemBuilder: (context, index) {
+                              final file = _files[index];
+                              final name = p.basename(file.path);
+                              final isDir = file is Directory;
+                              final isSelected = _selectedFiles.contains(file.path);
+                              
+                              return Column(
+                                children: [
+                                  ListTile(
+                                    leading: isDir
+                                        ? const Icon(Icons.folder, color: Colors.amber)
+                                        : Icon(
+                                            _getFileIcon(p.extension(name).replaceFirst('.', '')),
+                                            color: isSelected ? Colors.orange : _getFileColor(p.extension(name).replaceFirst('.', '')),
+                                          ),
+                                    title: Text(
+                                      name,
+                                      style: TextStyle(
+                                        fontWeight: isSelected ? FontWeight.bold : null,
+                                        color: isSelected ? Colors.orange : null,
+                                      ),
+                                    ),
+                                    subtitle: isDir 
+                                        ? const Text('文件夹', style: TextStyle(fontSize: 10)) 
+                                        : Text(
+                                            _fileContents.containsKey(file.path) 
+                                                ? '${_fileContents[file.path]!.length} 字符' 
+                                                : '点击预览内容',
+                                            style: const TextStyle(fontSize: 10),
+                                          ),
+                                    trailing: !isDir
+                                        ? Checkbox(
+                                            value: isSelected,
+                                            onChanged: (value) {
+                                              setState(() {
+                                                if (value == true) {
+                                                  _selectedFiles.add(file.path);
+                                                  _loadFileContent(file.path);
+                                                } else {
+                                                  _selectedFiles.remove(file.path);
+                                                  _fileContents.remove(file.path);
+                                                }
+                                              });
+                                            },
+                                          )
+                                        : IconButton(
+                                            icon: const Icon(Icons.chevron_right),
+                                            onPressed: () {
+                                              setState(() {
+                                                _currentPath = file.path;
+                                                _isLoading = true;
+                                              });
+                                              _loadFiles();
+                                            },
+                                          ),
+                                    onTap: isDir
+                                        ? () {
+                                            setState(() {
+                                              _currentPath = file.path;
+                                              _isLoading = true;
+                                            });
+                                            _loadFiles();
+                                          }
+                                        : () {
+                                            _showFilePreview(file.path, name);
+                                          },
+                                  ),
+                                  // 显示选中文件的内容预览
+                                  if (isSelected && _fileContents.containsKey(file.path))
+                                    Container(
+                                      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                                      padding: const EdgeInsets.all(8),
+                                      decoration: BoxDecoration(
+                                        color: Colors.orange.shade50,
+                                        borderRadius: BorderRadius.circular(8),
+                                        border: Border.all(color: Colors.orange.shade200),
+                                      ),
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Row(
+                                            children: [
+                                              Icon(Icons.preview, size: 14, color: Colors.orange.shade700),
+                                              const SizedBox(width: 4),
+                                              Text(
+                                                '内容预览',
+                                                style: TextStyle(
+                                                  fontSize: 10,
+                                                  fontWeight: FontWeight.bold,
+                                                  color: Colors.orange.shade700,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                          const SizedBox(height: 4),
+                                          Container(
+                                            constraints: const BoxConstraints(maxHeight: 100),
+                                            child: SingleChildScrollView(
+                                              child: Text(
+                                                _fileContents[file.path]!,
+                                                style: const TextStyle(
+                                                  fontFamily: 'monospace',
+                                                  fontSize: 10,
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                ],
+                              );
+                            },
+                          ),
+              ),
+              
+              // 底部按钮
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  border: Border(
+                    top: BorderSide(color: Theme.of(context).dividerColor),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () => Navigator.pop(context),
+                        child: const Text('取消'),
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: FilledButton.icon(
+                        onPressed: _selectedFiles.isEmpty
+                            ? null
+                            : () {
+                                widget.onConfirm(_selectedFiles.toList());
+                                Navigator.pop(context);
+                              },
+                        icon: const Icon(Icons.search),
+                        label: Text('检查 ${_selectedFiles.length} 个文件'),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: Colors.orange,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+  
+  void _showFilePreview(String filePath, String fileName) async {
+    await _loadFileContent(filePath);
+    if (!mounted) return;
+    
+    final content = _fileContents[filePath] ?? '无法读取文件内容';
+    
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(_getFileIcon(p.extension(fileName).replaceFirst('.', '')), color: Colors.orange),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                fileName,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+        content: SizedBox(
+          width: double.maxFinite,
+          height: 400,
+          child: SingleChildScrollView(
+            child: SelectableText(
+              content,
+              style: const TextStyle(
+                fontFamily: 'monospace',
+                fontSize: 12,
+              ),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('关闭'),
+          ),
+        ],
+      ),
+    );
+  }
+  
+  List<Widget> _buildPathBreadcrumbs() {
+    if (_currentPath == null) return [];
+    
+    final parts = _currentPath!.split('/');
+    final widgets = <Widget>[];
+    
+    for (int i = 0; i < parts.length; i++) {
+      if (i > 0) {
+        widgets.add(const Icon(Icons.chevron_right, size: 16));
+      }
+      widgets.add(
+        InkWell(
+          onTap: () {
+            final newPath = parts.sublist(0, i + 1).join('/');
+            setState(() {
+              _currentPath = newPath;
+              _isLoading = true;
+            });
+            _loadFiles();
+          },
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              color: i == parts.length - 1
+                  ? Theme.of(context).colorScheme.primaryContainer
+                  : null,
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: Text(
+              parts[i].isEmpty ? '/' : parts[i],
+              style: TextStyle(
+                fontSize: 12,
+                color: i == parts.length - 1
+                    ? Theme.of(context).colorScheme.onPrimaryContainer
+                    : null,
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+    
+    return widgets;
+  }
+  
+  IconData _getFileIcon(String extension) {
+    switch (extension.toLowerCase()) {
+      case 'dart': return Icons.code;
+      case 'py': return Icons.code;
+      case 'js': case 'ts': return Icons.javascript;
+      case 'java': return Icons.coffee;
+      case 'go': return Icons.code;
+      case 'rs': return Icons.settings;
+      case 'html': return Icons.html;
+      case 'css': return Icons.style;
+      case 'json': return Icons.data_object;
+      case 'yaml': case 'yml': return Icons.settings;
+      case 'md': return Icons.description;
+      default: return Icons.insert_drive_file;
+    }
+  }
+  
+  Color _getFileColor(String extension) {
+    switch (extension.toLowerCase()) {
+      case 'dart': return Colors.blue;
+      case 'py': return Colors.green;
+      case 'js': return Colors.yellow;
+      case 'java': return Colors.orange;
+      case 'html': return Colors.orange;
+      case 'css': return Colors.blue;
+      case 'json': return Colors.amber;
+      case 'yaml': case 'yml': return Colors.cyan;
+      default: return Colors.grey;
+    }
   }
 }

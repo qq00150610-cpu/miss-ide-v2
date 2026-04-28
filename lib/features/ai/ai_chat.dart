@@ -6,6 +6,7 @@ import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'ai_service.dart';
 import 'file_operation_service.dart';
+import '../file_manager/project_directory.dart';
 
 class AIChatPage extends StatefulWidget {
   final Function(String)? onNavigateToEditor;

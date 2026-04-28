@@ -3,9 +3,6 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../ai/ai_service.dart';
 import '../build/build_service.dart';
-import '../version/version_service.dart';
-import '../version/version_history.dart';
-import '../version/version_page.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -17,8 +14,6 @@ class SettingsPage extends StatefulWidget {
 class _SettingsPageState extends State<SettingsPage> {
   bool _darkMode = false;
   String _githubTokenStatus = '未配置';
-  String _currentVersion = '加载中...';
-  int _releaseCount = 0;
   final _storage = const FlutterSecureStorage();
 
   final List<Map<String, String>> _aiModels = [
@@ -38,21 +33,6 @@ class _SettingsPageState extends State<SettingsPage> {
     super.initState();
     _initService();
     _loadGitHubTokenStatus();
-    _loadVersionInfo();
-  }
-
-  Future<void> _loadVersionInfo() async {
-    await versionService.loadFromPubspec();
-    await versionHistoryService.init();
-    
-    final releases = await versionHistoryService.getReleases();
-    
-    if (mounted) {
-      setState(() {
-        _currentVersion = versionService.currentVersion.displayVersion;
-        _releaseCount = releases.length;
-      });
-    }
   }
 
   Future<void> _loadGitHubTokenStatus() async {
@@ -176,40 +156,10 @@ class _SettingsPageState extends State<SettingsPage> {
           _buildSection(
             '关于',
             [
-              ListTile(
-                leading: const Icon(Icons.info),
-                title: const Text('版本'),
-                subtitle: Text(_currentVersion),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => const VersionHistoryPage(),
-                    ),
-                  ).then((_) => _loadVersionInfo());
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.history),
-                title: const Text('版本历史'),
-                subtitle: Text('$_releaseCount 个发布版本'),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => const VersionHistoryPage(),
-                    ),
-                  ).then((_) => _loadVersionInfo());
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.download),
-                title: const Text('下载历史版本'),
-                subtitle: const Text('查看所有 GitHub Releases'),
-                trailing: const Icon(Icons.open_in_new),
-                onTap: () => _launchUrl(versionService.releasesPageUrl),
+              const ListTile(
+                leading: Icon(Icons.info),
+                title: Text('版本'),
+                subtitle: Text('Miss IDE v2.0.0'),
               ),
               ListTile(
                 leading: const Icon(Icons.code),
@@ -217,7 +167,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 onTap: () => showLicensePage(
                   context: context,
                   applicationName: 'Miss IDE',
-                  applicationVersion: versionService.currentVersion.versionString,
+                  applicationVersion: '2.0.0',
                 ),
               ),
             ],
@@ -301,150 +251,58 @@ class _SettingsPageState extends State<SettingsPage> {
 
   void _showApiKeyDialog() {
     final controller = TextEditingController(text: aiService.apiKey);
-    bool isValidating = false;
-    
     showDialog(
       context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setState) => AlertDialog(
-          title: Row(
-            children: [
-              Text('${aiService.selectedModel} API Key'),
-              const SizedBox(width: 8),
-              if (isValidating)
-                const SizedBox(
-                  width: 16,
-                  height: 16,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              else if (aiService.apiKey.isNotEmpty)
-                Icon(
-                  aiService.isApiKeyValid == true ? Icons.check_circle : Icons.info_outline,
-                  size: 20,
-                  color: aiService.isApiKeyValid == true ? Colors.green : Colors.orange,
-                ),
-            ],
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              TextField(
-                controller: controller,
-                decoration: InputDecoration(
-                  hintText: '粘贴API Key',
-                  border: const OutlineInputBorder(),
-                  suffixIcon: controller.text.isNotEmpty
-                      ? IconButton(
-                          icon: const Icon(Icons.clear, size: 18),
-                          onPressed: () => controller.clear(),
-                        )
-                      : null,
-                ),
-                maxLines: 2,
+      builder: (context) => AlertDialog(
+        title: Text('${aiService.selectedModel} API Key'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: controller,
+              decoration: const InputDecoration(
+                hintText: '粘贴API Key',
+                border: OutlineInputBorder(),
               ),
-              const SizedBox(height: 12),
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: Colors.blue.shade50,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      '获取地址: ${_getModelUrl(aiService.selectedModel)}',
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: Colors.blue.shade700,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      '提示: API Key 会安全存储在本地，不会上传到服务器',
-                      style: TextStyle(
-                        fontSize: 10,
-                        color: Colors.grey.shade600,
-                      ),
-                    ),
-                  ],
-                ),
+              maxLines: 3,
+            ),
+            const SizedBox(height: 12),
+            Text(
+              '获取地址: ${_getModelUrl(aiService.selectedModel)}',
+              style: TextStyle(
+                fontSize: 12,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
               ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('取消'),
-            ),
-            OutlinedButton.icon(
-              onPressed: isValidating
-                  ? null
-                  : () async {
-                      final key = controller.text.trim();
-                      if (key.isEmpty) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('请输入API Key')),
-                        );
-                        return;
-                      }
-                      
-                      setState(() => isValidating = true);
-                      await aiService.saveApiKey(key);
-                      setState(() => isValidating = false);
-                      
-                      if (mounted) {
-                        Navigator.pop(context);
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text('${aiService.selectedModel} API Key 已保存'),
-                            backgroundColor: Colors.green,
-                          ),
-                        );
-                        this.setState(() {});
-                      }
-                    },
-              icon: const Icon(Icons.save, size: 18),
-              label: const Text('保存'),
-            ),
-            FilledButton.icon(
-              onPressed: isValidating || controller.text.isEmpty
-                  ? null
-                  : () async {
-                      final key = controller.text.trim();
-                      if (key.isEmpty) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('请输入API Key')),
-                        );
-                        return;
-                      }
-                      
-                      setState(() => isValidating = true);
-                      await aiService.saveApiKey(key);
-                      final isValid = await aiService.validateApiKey();
-                      setState(() => isValidating = false);
-                      
-                      if (mounted) {
-                        Navigator.pop(context);
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text(
-                              isValid 
-                                  ? 'API Key 验证成功 ✓' 
-                                  : 'API Key 验证失败，请检查是否正确',
-                            ),
-                            backgroundColor: isValid ? Colors.green : Colors.red,
-                          ),
-                        );
-                        this.setState(() {});
-                      }
-                    },
-              icon: const Icon(Icons.verified, size: 18),
-              label: const Text('验证'),
             ),
           ],
         ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () async {
+              final key = controller.text.trim();
+              if (key.isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('请输入API Key')),
+                );
+                return;
+              }
+              
+              final success = await aiService.saveApiKey(key);
+              if (success && mounted) {
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('${aiService.selectedModel} API Key已保存')),
+                );
+                setState(() {});
+              }
+            },
+            child: const Text('保存'),
+          ),
+        ],
       ),
     );
   }

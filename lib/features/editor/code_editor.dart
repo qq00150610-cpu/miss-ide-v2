@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 import 'package:miss_ide/features/file_manager/project_directory.dart';
 import 'package:miss_ide/features/editor/editor_settings.dart';
 
@@ -284,30 +285,22 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
                         )
                       : Container(
                           color: _editorSettings.backgroundColor,
-                          child: Row(
-                            children: [
-                              // 行号面板 - 修复对齐问题：使用与代码区相同的主滚动控制器
-                              if (_editorSettings.showLineNumbers)
-                                Container(
-                                  width: 50,
-                                  color: _editorSettings.backgroundColor.withOpacity(0.95),
-                                  child: NotificationListener<ScrollNotification>(
-                                    onNotification: (notification) {
-                                      // 同步滚动
-                                      if (!_scrollController.hasClients) return false;
-                                      if (notification is ScrollUpdateNotification) {
-                                        _scrollController.jumpTo(notification.metrics.pixels);
-                                      }
-                                      return false;
-                                    },
-                                    child: ListView.builder(
-                                      controller: _scrollController,
-                                      physics: const BouncingScrollPhysics(),
-                                      itemCount: _getLineCount(),
-                                      itemBuilder: (context, index) {
-                                        final lineHeight = _editorSettings.fontSize * _editorSettings.lineHeight;
-                                        return Container(
-                                          height: lineHeight,
+                          child: SingleChildScrollView(
+                            controller: _scrollController,
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                // 行号面板 - 与代码区同一滚动容器，确保对齐
+                                if (_editorSettings.showLineNumbers)
+                                  Container(
+                                    width: 50,
+                                    color: _editorSettings.backgroundColor.withOpacity(0.95),
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.end,
+                                      children: List.generate(
+                                        _getLineCount(),
+                                        (index) => Container(
+                                          height: _editorSettings.fontSize * _editorSettings.lineHeight,
                                           alignment: Alignment.centerRight,
                                           padding: const EdgeInsets.only(right: 8),
                                           child: Text(
@@ -319,48 +312,49 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
                                               color: _editorSettings.textColor.withOpacity(0.5),
                                             ),
                                           ),
-                                        );
-                                      },
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                // 分隔线
+                                Container(
+                                  width: 1,
+                                  height: _getLineCount() * _editorSettings.fontSize * _editorSettings.lineHeight,
+                                  color: _editorSettings.textColor.withOpacity(0.2),
+                                ),
+                                // 代码编辑区
+                                Expanded(
+                                  child: Container(
+                                    color: _editorSettings.backgroundColor,
+                                    child: TextField(
+                                      controller: _controller,
+                                      focusNode: _editorFocusNode,
+                                      autofocus: true,
+                                      enabled: true,
+                                      readOnly: false,
+                                      maxLines: null,
+                                      expands: false,
+                                      keyboardType: TextInputType.multiline,
+                                      textInputAction: TextInputAction.newline,
+                                      scrollPhysics: const NeverScrollableScrollPhysics(),
+                                      style: TextStyle(
+                                        fontFamily: 'monospace',
+                                        fontSize: _editorSettings.fontSize,
+                                        height: _editorSettings.lineHeight,
+                                        color: _editorSettings.textColor,
+                                      ),
+                                      decoration: InputDecoration(
+                                        border: InputBorder.none,
+                                        contentPadding: const EdgeInsets.all(16),
+                                        fillColor: _editorSettings.backgroundColor,
+                                        filled: true,
+                                      ),
+                                      onChanged: (_) => _onContentChanged(),
                                     ),
                                   ),
                                 ),
-                              // 分隔线
-                              Container(
-                                width: 1,
-                                color: _editorSettings.textColor.withOpacity(0.2),
-                              ),
-                              // 代码编辑区 - 修复编辑问题：确保可编辑
-                              Expanded(
-                                child: Container(
-                                  color: _editorSettings.backgroundColor,
-                                  child: TextField(
-                                    controller: _controller,
-                                    focusNode: _editorFocusNode,
-                                    autofocus: true,
-                                    enabled: true,
-                                    readOnly: false,
-                                    maxLines: null,
-                                    expands: false,
-                                    keyboardType: TextInputType.multiline,
-                                    textInputAction: TextInputAction.newline,
-                                    scrollPhysics: const BouncingScrollPhysics(),
-                                    style: TextStyle(
-                                      fontFamily: 'monospace',
-                                      fontSize: _editorSettings.fontSize,
-                                      height: _editorSettings.lineHeight,
-                                      color: _editorSettings.textColor,
-                                    ),
-                                    decoration: InputDecoration(
-                                      border: InputBorder.none,
-                                      contentPadding: const EdgeInsets.all(16),
-                                      fillColor: _editorSettings.backgroundColor,
-                                      filled: true,
-                                    ),
-                                    onChanged: (_) => _onContentChanged(),
-                                  ),
-                                ),
-                              ),
-                            ],
+                              ],
+                            ),
                           ),
                         ),
                 ),
@@ -579,16 +573,54 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
   }
 
   Future<void> _saveAs() async {
+    // Android 不支持 FilePicker.platform.saveFile，使用对话框保存到项目目录
+    final TextEditingController nameController = TextEditingController(text: 'untitled.txt');
+    
+    final fileName = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('保存文件'),
+        content: TextField(
+          controller: nameController,
+          decoration: const InputDecoration(
+            labelText: '文件名',
+            hintText: '输入文件名（含扩展名）',
+          ),
+          autofocus: true,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, nameController.text),
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+    
+    if (fileName == null || fileName.isEmpty) return;
+    
+    // 保存到项目目录
+    String outputPath;
+    if (_currentProjectPath != null && _currentProjectPath!.isNotEmpty) {
+      outputPath = '$_currentProjectPath/$fileName';
+    } else {
+      // 如果没有项目路径，使用应用目录
+      final appDir = await getApplicationDocumentsDirectory();
+      outputPath = '${appDir.path}/$fileName';
+    }
+    
     try {
-      String? outputPath = await FilePicker.platform.saveFile(
-        dialogTitle: '保存文件',
-        fileName: 'untitled.dart',
-      );
-      if (outputPath == null) return;
-      
       final file = File(outputPath);
+      // 确保目录存在
+      final dir = file.parent;
+      if (!await dir.exists()) {
+        await dir.create(recursive: true);
+      }
       await file.writeAsString(_controller.text);
-      final fileName = outputPath.split('/').last;
       
       setState(() {
         if (_tabs.isEmpty) {

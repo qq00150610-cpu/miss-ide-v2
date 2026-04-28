@@ -17,8 +17,13 @@ on:
 jobs:
   build-android:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.new_version }}
+      tag: ${{ steps.version.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       
       - name: Setup Java
         uses: actions/setup-java@v4
@@ -36,12 +41,20 @@ jobs:
       - name: Get dependencies
         run: flutter pub get
       
-      - name: Get version
+      - name: Get current version
         id: version
         run: |
           VERSION=$(grep "^version:" pubspec.yaml | sed 's/version: *//' | tr -d ' ')
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          MAJOR=$(echo "$VERSION" | cut -d'.' -f1)
+          MINOR=$(echo "$VERSION" | cut -d'.' -f2 | cut -d'+' -f1)
+          PATCH=$(echo "$VERSION" | cut -d'.' -f3 | cut -d'+' -f1)
+          TAG="v${MAJOR}.${MINOR}.${PATCH}"
+          
           echo "当前版本: $VERSION"
+          echo "Tag: $TAG"
+          
+          echo "new_version=$VERSION" >> $GITHUB_OUTPUT
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
       
       - name: Determine Build Type
         id: build_type
@@ -51,36 +64,85 @@ jobs:
           else
             echo "type=release" >> $GITHUB_OUTPUT
           fi
+          echo "构建类型: ${{ steps.build_type.outputs.type }}"
       
       - name: Build APK
         run: |
+          echo "开始构建 APK..."
           if [ "${{ steps.build_type.outputs.type }}" == "debug" ]; then
-            flutter build apk --debug --no-tree-shake-icons || flutter build apk --debug
+            flutter build apk --debug --no-tree-shake-icons 2>&1 || flutter build apk --debug 2>&1
           else
-            flutter build apk --release --no-tree-shake-icons || flutter build apk --release
+            flutter build apk --release --no-tree-shake-icons 2>&1 || flutter build apk --release 2>&1
           fi
+          echo "构建完成"
       
       - name: List Build Outputs
-        run: ls -la build/app/outputs/flutter-apk/
+        run: |
+          echo "构建产物列表:"
+          ls -la build/app/outputs/flutter-apk/ || echo "APK 目录不存在"
       
       - name: Rename APK
+        if: always()
         run: |
-          cd build/app/outputs/flutter-apk/
-          cp app-${{ steps.build_type.outputs.type }}.apk miss-ide-v2.apk
-          ls -la *.apk
+          cd build/app/outputs/flutter-apk/ || exit 0
+          if [ -f "app-${{ steps.build_type.outputs.type }}.apk" ]; then
+            cp app-${{ steps.build_type.outputs.type }}.apk miss-ide-v2-${{ steps.version.outputs.new_version }}-${{ steps.build_type.outputs.type }}.apk
+            ls -la *.apk
+          else
+            echo "APK 文件未找到，尝试列出所有文件:"
+            ls -la
+          fi
       
       - name: Upload APK Artifact
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: miss-ide-v2-apk
-          path: build/app/outputs/flutter-apk/miss-ide-v2.apk
+          name: miss-ide-v2-${{ steps.build_type.outputs.type }}-${{ steps.version.outputs.new_version }}
+          path: build/app/outputs/flutter-apk/miss-ide-v2-${{ steps.version.outputs.new_version }}-${{ steps.build_type.outputs.type }}.apk
           retention-days: 30
+      
+      - name: Create GitHub Release
+        if: steps.build_type.outputs.type == 'release'
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          release_name: Miss IDE v2 ${{ steps.version.outputs.tag }}
+          body: |
+            ## Miss IDE v2 ${{ steps.version.outputs.new_version }}
+            
+            ### 下载 APK
+            - [Miss IDE v2 ${{ steps.version.outputs.new_version }}](https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.tag }}/miss-ide-v2-${{ steps.version.outputs.new_version }}-release.apk)
+            
+            ---
+            自动构建版本
+          draft: false
+          prerelease: false
+      
+      - name: Upload Release Asset
+        if: steps.build_type.outputs.type == 'release' && steps.create_release.outputs.release_id != ''
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: build/app/outputs/flutter-apk/miss-ide-v2-${{ steps.version.outputs.new_version }}-release.apk
+          asset_name: miss-ide-v2-${{ steps.version.outputs.new_version }}-release.apk
+          asset_content_type: application/vnd.android.package-archive
       
       - name: Display Download Info
         run: |
           echo "=========================================="
           echo "构建完成！"
-          echo "版本: ${{ steps.version.outputs.version }}"
-          echo "APK 文件: miss-ide-v2.apk"
-          echo "下载: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          echo "版本: ${{ steps.version.outputs.new_version }}"
+          echo "Tag: ${{ steps.version.outputs.tag }}"
+          echo "APK 文件: miss-ide-v2-${{ steps.version.outputs.new_version }}-${{ steps.build_type.outputs.type }}.apk"
+          echo "构建类型: ${{ steps.build_type.outputs.type }}"
           echo "=========================================="
+          if [ "${{ steps.build_type.outputs.type }}" == "release" ]; then
+            echo "Release: https://github.com/${{ github.repository }}/releases/tag/${{ steps.version.outputs.tag }}"
+          else
+            echo "APK 下载: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          fi

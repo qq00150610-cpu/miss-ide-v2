@@ -3,17 +3,17 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 /// 编辑器设置
 class EditorSettings {
-  final Color backgroundColor;
-  final Color fontColor;
-  final double fontSize;
-  final double lineHeight;
-  final bool showLineNumbers;
-  final bool autoSave;
-  final int autoSaveDelay; // 秒
-  final int tabSize;
-  final bool useSpaces;
+  Color backgroundColor;
+  Color fontColor;
+  double fontSize;
+  double lineHeight;
+  bool showLineNumbers;
+  bool autoSave;
+  int autoSaveDelay; // 秒
+  int tabSize;
+  bool useSpaces;
 
-  const EditorSettings({
+  EditorSettings({
     this.backgroundColor = const Color(0xFF1E1E1E),
     this.fontColor = const Color(0xFFD4D4D4),
     this.fontSize = 14.0,
@@ -24,6 +24,10 @@ class EditorSettings {
     this.tabSize = 2,
     this.useSpaces = true,
   });
+
+  /// 兼容旧代码的别名
+  Color get textColor => fontColor;
+  set textColor(Color value) => fontColor = value;
 
   EditorSettings copyWith({
     Color? backgroundColor,
@@ -85,7 +89,7 @@ class EditorSettings {
   static Future<EditorSettings> load() async {
     final prefs = await SharedPreferences.getInstance();
     final String? data = prefs.getString('editor_settings');
-    if (data == null) return const EditorSettings();
+    if (data == null) return EditorSettings();
     // 简单解析
     try {
       final Map<String, dynamic> json = {};
@@ -109,39 +113,21 @@ class EditorSettings {
       }
       return EditorSettings.fromJson(json);
     } catch (e) {
-      return const EditorSettings();
+      return EditorSettings();
     }
   }
 }
 
 /// 预设颜色主题
 class EditorColorPresets {
-  static Map<String, EditorSettings> getAllPresets() {
-    return {
-      '深色': const EditorSettings(
-        backgroundColor: Color(0xFF1E1E1E),
-        fontColor: Color(0xFFD4D4D4),
-      ),
-      '更深夜色': const EditorSettings(
-        backgroundColor: Color(0xFF0D0D0D),
-        fontColor: Color(0xFFCCCCCC),
-      ),
-      '浅色': const EditorSettings(
-        backgroundColor: Color(0xFFFFFFFF),
-        fontColor: Color(0xFF333333),
-      ),
-      '护眼绿': const EditorSettings(
-        backgroundColor: Color(0xFFCCE8CF),
-        fontColor: Color(0xFF2E4A2E),
-      ),
-      '海洋蓝': const EditorSettings(
-        backgroundColor: Color(0xFF1E3A5F),
-        fontColor: Color(0xFFB8D4E8),
-      ),
-      '紫罗兰': const EditorSettings(
-        backgroundColor: Color(0xFF2D1B4E),
-        fontColor: Color(0xFFE8D8F0),
-      ),
-    };
+  static List<Map<String, dynamic>> getAllPresets() {
+    return [
+      {'name': '深色', 'background': const Color(0xFF1E1E1E), 'text': const Color(0xFFD4D4D4), 'icon': Icons.dark_mode},
+      {'name': '更深夜色', 'background': const Color(0xFF0D0D0D), 'text': const Color(0xFFCCCCCC), 'icon': Icons.nights_stay},
+      {'name': '浅色', 'background': const Color(0xFFFFFFFF), 'text': const Color(0xFF333333), 'icon': Icons.light_mode},
+      {'name': '护眼绿', 'background': const Color(0xFFCCE8CF), 'text': const Color(0xFF2E4A2E), 'icon': Icons.grass},
+      {'name': '海洋蓝', 'background': const Color(0xFF1E3A5F), 'text': const Color(0xFFB8D4E8), 'icon': Icons.water},
+      {'name': '紫罗兰', 'background': const Color(0xFF2D1B4E), 'text': const Color(0xFFE8D8F0), 'icon': Icons.auto_awesome},
+    ];
   }
 }

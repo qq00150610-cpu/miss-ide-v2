@@ -91,7 +91,7 @@ class SyntaxHighlighter {
     'register', 'restrict', 'return', 'short', 'signed', 'sizeof', 'static', 'struct',
     'switch', 'typedef', 'union', 'unsigned', 'void', 'volatile', 'while', 'NULL',
     'true', 'false', 'class', 'public', 'private', 'protected', 'virtual', 'template',
-    'namespace', 'using', 'new', 'delete', 'this', 'throw', 'try', 'catch', 'throw',
+    'namespace', 'using', 'new', 'delete', 'this', 'throw', 'try', 'catch',
   };
   
   /// 根据语言类型获取关键词集合
@@ -133,8 +133,8 @@ class SyntaxHighlighter {
     final keywords = getKeywords(language);
     final spans = <TextSpan>[];
     
-    // 正则表达式 - 使用更简单的模式避免转义问题
-    final stringRegex = RegExp(r'"(?:[^"\\]|\\.)*"|\'(?:[^\'\\]|\\.)*\'');
+    // 正则表达式 - 简化模式
+    final stringRegex = RegExp(r'"[^"]*"|' + r"'[^']*'");
     final singleLineCommentRegex = RegExp(r'//.*$', multiLine: true);
     final multiLineCommentRegex = RegExp(r'/\*[\s\S]*?\*/');
     final numberRegex = RegExp(r'\b\d+\.?\d*\b');

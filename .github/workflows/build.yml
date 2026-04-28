@@ -13,12 +13,28 @@ on:
         options:
           - debug
           - release
+      version_type:
+        description: 'Version Increment Type'
+        required: false
+        default: 'build'
+        type: choice
+        options:
+          - build
+          - patch
+          - minor
+          - major
 
 jobs:
   build-android:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.new_version }}
+      tag: ${{ steps.version.outputs.tag }}
+      release_id: ${{ steps.create_release.outputs.release_id }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       
       - name: Setup Java
         uses: actions/setup-java@v4
@@ -36,6 +52,13 @@ jobs:
       - name: Get dependencies
         run: flutter pub get
       
+      - name: Get current version
+        id: current_version
+        run: |
+          VERSION=$(grep "^version:" pubspec.yaml | cut -d':' -f2 | tr -d ' ')
+          echo "current_version=$VERSION" >> $GITHUB_OUTPUT
+          echo "当前版本: $VERSION"
+      
       - name: Determine Build Type
         id: build_type
         run: |
@@ -44,6 +67,81 @@ jobs:
           else
             echo "type=release" >> $GITHUB_OUTPUT
           fi
+      
+      - name: Increment Version
+        id: version
+        run: |
+          CURRENT_VERSION=${{ steps.current_version.outputs.current_version }}
+          VERSION_TYPE="${inputs.version_type:-build}"
+          
+          # 解析版本号 (major.minor.patch+build)
+          MAJOR=$(echo $CURRENT_VERSION | cut -d'.' -f1)
+          MINOR=$(echo $CURRENT_VERSION | cut -d'.' -f2 | cut -d'+' -f1)
+          PATCH=$(echo $CURRENT_VERSION | cut -d'.' -f3 | cut -d'+' -f1)
+          BUILD=$(echo $CURRENT_VERSION | grep '+' | cut -d'+' -f2)
+          
+          if [ -z "$BUILD" ]; then
+            BUILD=$(echo $CURRENT_VERSION | cut -d'+' -f2)
+            if [ -z "$BUILD" ]; then
+              PATCH=$(echo $CURRENT_VERSION | cut -d'.' -f3)
+              BUILD=0
+            fi
+          fi
+          
+          # 默认值
+          if [ -z "$MAJOR" ]; then MAJOR=2; fi
+          if [ -z "$MINOR" ]; then MINOR=0; fi
+          if [ -z "$PATCH" ]; then PATCH=0; fi
+          if [ -z "$BUILD" ]; then BUILD=0; fi
+          
+          echo "解析版本: MAJOR=$MAJOR MINOR=$MINOR PATCH=$PATCH BUILD=$BUILD"
+          
+          # 根据版本类型递增
+          case $VERSION_TYPE in
+            build)
+              NEW_BUILD=$((BUILD + 1))
+              NEW_PATCH=$PATCH
+              NEW_MINOR=$MINOR
+              NEW_MAJOR=$MAJOR
+              ;;
+            patch)
+              NEW_BUILD=1
+              NEW_PATCH=$((PATCH + 1))
+              NEW_MINOR=$MINOR
+              NEW_MAJOR=$MAJOR
+              ;;
+            minor)
+              NEW_BUILD=1
+              NEW_PATCH=0
+              NEW_MINOR=$((MINOR + 1))
+              NEW_MAJOR=$MAJOR
+              ;;
+            major)
+              NEW_BUILD=1
+              NEW_PATCH=0
+              NEW_MINOR=0
+              NEW_MAJOR=$((MAJOR + 1))
+              ;;
+            *)
+              NEW_BUILD=$((BUILD + 1))
+              NEW_PATCH=$PATCH
+              NEW_MINOR=$MINOR
+              NEW_MAJOR=$MAJOR
+              ;;
+          esac
+          
+          NEW_VERSION="${NEW_MAJOR}.${NEW_MINOR}.${NEW_PATCH}+${NEW_BUILD}"
+          TAG="v${NEW_MAJOR}.${NEW_MINOR}.${NEW_PATCH}"
+          
+          echo "新版本: $NEW_VERSION"
+          echo "Tag: $TAG"
+          
+          # 更新 pubspec.yaml
+          sed -i "s/^version:.*/version: $NEW_VERSION/" pubspec.yaml
+          
+          echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "新版本已更新到 pubspec.yaml"
       
       - name: Build APK
         run: |
@@ -56,24 +154,70 @@ jobs:
       - name: List Build Outputs
         run: ls -la build/app/outputs/flutter-apk/
       
-      - name: Upload APK
+      - name: Rename APK
+        run: |
+          cd build/app/outputs/flutter-apk/
+          cp app-${{ steps.build_type.outputs.type }}.apk miss-ide-v2-${{ steps.version.outputs.new_version }}-${{ steps.build_type.outputs.type }}.apk
+          ls -la *.apk
+      
+      - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: miss-ide-v2-apk-${{ steps.build_type.outputs.type }}
-          path: build/app/outputs/flutter-apk/app-${{ steps.build_type.outputs.type }}.apk
-          retention-days: 7
+          name: miss-ide-v2-${{ steps.build_type.outputs.type }}-${{ steps.version.outputs.new_version }}
+          path: build/app/outputs/flutter-apk/miss-ide-v2-${{ steps.version.outputs.new_version }}-${{ steps.build_type.outputs.type }}.apk
+          retention-days: 30
       
-      - name: Create Download URL
+      - name: Create GitHub Release
+        if: steps.build_type.outputs.type == 'release'
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          release_name: Miss IDE v2 ${{ steps.version.outputs.tag }}
+          body: |
+            ## Miss IDE v2 ${{ steps.version.outputs.new_version }}
+            
+            ### 下载 APK
+            - [Miss IDE v2 ${{ steps.version.outputs.new_version }}](https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.tag }}/miss-ide-v2-${{ steps.version.outputs.new_version }}-release.apk)
+            
+            ---
+            自动构建版本
+          draft: false
+          prerelease: false
+      
+      - name: Upload Release Asset
+        if: steps.build_type.outputs.type == 'release' && steps.create_release.outputs.release_id != ''
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: build/app/outputs/flutter-apk/miss-ide-v2-${{ steps.version.outputs.new_version }}-release.apk
+          asset_name: miss-ide-v2-${{ steps.version.outputs.new_version }}-release.apk
+          asset_content_type: application/vnd.android.package-archive
+      
+      - name: Commit Version Update
+        if: steps.build_type.outputs.type == 'release'
         run: |
-          echo "artifact_url=https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" >> $GITHUB_OUTPUT
-          echo "artifact_name=miss-ide-v2-${{ steps.build_type.outputs.type }}.apk" >> $GITHUB_OUTPUT
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git add pubspec.yaml
+          git commit -m "chore: bump version to ${{ steps.version.outputs.new_version }}"
+          git push || echo "Push skipped (no changes or permission issue)"
       
       - name: Display Download Info
         run: |
           echo "=========================================="
           echo "构建完成！"
-          echo "APK 文件: app-${{ steps.build_type.outputs.type }}.apk"
+          echo "新版本: ${{ steps.version.outputs.new_version }}"
+          echo "Tag: ${{ steps.version.outputs.tag }}"
+          echo "APK 文件: miss-ide-v2-${{ steps.version.outputs.new_version }}-${{ steps.build_type.outputs.type }}.apk"
           echo "构建类型: ${{ steps.build_type.outputs.type }}"
           echo "=========================================="
-          echo "您可以在 Artifacts 中下载 APK 文件"
-          echo "或者点击上方 'Summary' 查看构建产物"
+          if [ "${{ steps.build_type.outputs.type }}" == "release" ]; then
+            echo "Release: https://github.com/${{ github.repository }}/releases/tag/${{ steps.version.outputs.tag }}"
+          else
+            echo "APK 下载: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          fi

@@ -251,58 +251,150 @@ class _SettingsPageState extends State<SettingsPage> {
 
   void _showApiKeyDialog() {
     final controller = TextEditingController(text: aiService.apiKey);
+    bool isValidating = false;
+    
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text('${aiService.selectedModel} API Key'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: controller,
-              decoration: const InputDecoration(
-                hintText: '粘贴API Key',
-                border: OutlineInputBorder(),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          title: Row(
+            children: [
+              Text('${aiService.selectedModel} API Key'),
+              const SizedBox(width: 8),
+              if (isValidating)
+                const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              else if (aiService.apiKey.isNotEmpty)
+                Icon(
+                  aiService.isApiKeyValid == true ? Icons.check_circle : Icons.info_outline,
+                  size: 20,
+                  color: aiService.isApiKeyValid == true ? Colors.green : Colors.orange,
+                ),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              TextField(
+                controller: controller,
+                decoration: InputDecoration(
+                  hintText: '粘贴API Key',
+                  border: const OutlineInputBorder(),
+                  suffixIcon: controller.text.isNotEmpty
+                      ? IconButton(
+                          icon: const Icon(Icons.clear, size: 18),
+                          onPressed: () => controller.clear(),
+                        )
+                      : null,
+                ),
+                maxLines: 2,
               ),
-              maxLines: 3,
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.blue.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '获取地址: ${_getModelUrl(aiService.selectedModel)}',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Colors.blue.shade700,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '提示: API Key 会安全存储在本地，不会上传到服务器',
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: Colors.grey.shade600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('取消'),
             ),
-            const SizedBox(height: 12),
-            Text(
-              '获取地址: ${_getModelUrl(aiService.selectedModel)}',
-              style: TextStyle(
-                fontSize: 12,
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
+            OutlinedButton.icon(
+              onPressed: isValidating
+                  ? null
+                  : () async {
+                      final key = controller.text.trim();
+                      if (key.isEmpty) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('请输入API Key')),
+                        );
+                        return;
+                      }
+                      
+                      setState(() => isValidating = true);
+                      await aiService.saveApiKey(key);
+                      setState(() => isValidating = false);
+                      
+                      if (mounted) {
+                        Navigator.pop(context);
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('${aiService.selectedModel} API Key 已保存'),
+                            backgroundColor: Colors.green,
+                          ),
+                        );
+                        this.setState(() {});
+                      }
+                    },
+              icon: const Icon(Icons.save, size: 18),
+              label: const Text('保存'),
+            ),
+            FilledButton.icon(
+              onPressed: isValidating || controller.text.isEmpty
+                  ? null
+                  : () async {
+                      final key = controller.text.trim();
+                      if (key.isEmpty) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('请输入API Key')),
+                        );
+                        return;
+                      }
+                      
+                      setState(() => isValidating = true);
+                      await aiService.saveApiKey(key);
+                      final isValid = await aiService.validateApiKey();
+                      setState(() => isValidating = false);
+                      
+                      if (mounted) {
+                        Navigator.pop(context);
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              isValid 
+                                  ? 'API Key 验证成功 ✓' 
+                                  : 'API Key 验证失败，请检查是否正确',
+                            ),
+                            backgroundColor: isValid ? Colors.green : Colors.red,
+                          ),
+                        );
+                        this.setState(() {});
+                      }
+                    },
+              icon: const Icon(Icons.verified, size: 18),
+              label: const Text('验证'),
             ),
           ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            onPressed: () async {
-              final key = controller.text.trim();
-              if (key.isEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('请输入API Key')),
-                );
-                return;
-              }
-              
-              final success = await aiService.saveApiKey(key);
-              if (success && mounted) {
-                Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('${aiService.selectedModel} API Key已保存')),
-                );
-                setState(() {});
-              }
-            },
-            child: const Text('保存'),
-          ),
-        ],
       ),
     );
   }

@@ -33,7 +33,7 @@ class AIModelConfig {
 class ProjectTemplate {
   final String name;
   final String description;
-  final Map<String, String> files; // path -> content
+  final Map<String, String> files;
   
   ProjectTemplate({
     required this.name,
@@ -59,7 +59,7 @@ enum AIIntentType {
 }
 
 /// AI服务 - 支持多模型
-/// 已修复：API Key 存储和验证功能
+/// 重构版本：确保 API Key 功能正常
 class AIService {
   static final AIService _instance = AIService._internal();
   factory AIService() => _instance;
@@ -71,6 +71,10 @@ class AIService {
   bool _isValidating = false;
   bool? _isApiKeyValid;
   
+  // 请求超时时间
+  static const Duration _timeout = Duration(seconds: 60);
+  static const Duration _validateTimeout = Duration(seconds: 15);
+  
   // AI回调函数
   Function(String)? onProjectCreated;
   Function(String, String)? onCodeGenerated;
@@ -80,13 +84,13 @@ class AIService {
     'DeepSeek': AIModelConfig(
       name: 'DeepSeek',
       provider: 'deepseek',
-      apiEndpoint: 'https://api.deepseek.com/chat/completions',
+      apiEndpoint: 'https://api.deepseek.com/v1/chat/completions',
       modelId: 'deepseek-chat',
     ),
     '通义千问': AIModelConfig(
       name: '通义千问',
       provider: 'qwen',
-      apiEndpoint: 'https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation',
+      apiEndpoint: 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions',
       modelId: 'qwen-turbo',
     ),
     '豆包': AIModelConfig(
@@ -98,7 +102,7 @@ class AIService {
     'Minimax': AIModelConfig(
       name: 'Minimax',
       provider: 'minimax',
-      apiEndpoint: 'https://api.minimax.chat/v1/chat/completions_v2',
+      apiEndpoint: 'https://api.minimax.chat/v1/chat/completions',
       modelId: 'abab6.5-chat',
     ),
     '智谱清言': AIModelConfig(
@@ -228,7 +232,6 @@ main();
     try {
       final prefs = await SharedPreferences.getInstance();
       _selectedModel = prefs.getString('ai_selected_model') ?? 'DeepSeek';
-      // 修复：确保正确加载当前模型的 API Key
       _apiKey = prefs.getString('ai_api_key_$_selectedModel') ?? '';
       debugPrint('AI Service initialized. Model: $_selectedModel, has API Key: ${_apiKey.isNotEmpty}');
     } catch (e) {
@@ -271,9 +274,7 @@ main();
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('ai_selected_model', modelName);
-      // 修复：加载新模型的 API Key
       _apiKey = prefs.getString('ai_api_key_$modelName') ?? '';
-      // 重置验证状态
       _isApiKeyValid = null;
       debugPrint('Switched to model: $modelName, has API Key: ${_apiKey.isNotEmpty}');
     } catch (e) {
@@ -288,10 +289,10 @@ main();
       _apiKey = apiKey.trim();
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('ai_api_key_$_selectedModel', apiKey.trim());
-      debugPrint('API Key saved for $_selectedModel');
+      debugPrint('API Key saved for $_selectedModel: ${apiKey.trim().substring(0, apiKey.length > 10 ? 10 : apiKey.length)}...');
       
-      // 验证 API Key
-      validateApiKey();
+      // 重置验证状态，不自动验证（避免网络问题）
+      _isApiKeyValid = null;
       
       return true;
     } catch (e) {
@@ -317,7 +318,7 @@ main();
       final config = _models[_selectedModel];
       if (config == null || config.provider == 'ollama') {
         _isValidating = false;
-        _isApiKeyValid = true; // Ollama 不需要 API Key
+        _isApiKeyValid = true;
         onApiKeyValidated?.call(true);
         return true;
       }
@@ -351,7 +352,7 @@ main();
       
     } catch (e) {
       debugPrint('API Key validation error: $e');
-      _isApiKeyValid = false;
+      _isApiKeyValid = null; // 网络错误时不标记为无效
       onApiKeyValidated?.call(false);
     } finally {
       _isValidating = false;
@@ -374,12 +375,11 @@ main();
           'messages': [{'role': 'user', 'content': 'hi'}],
           'max_tokens': 5,
         })),
-      ).timeout(const Duration(seconds: 10));
+      ).timeout(_validateTimeout);
       
       return response.statusCode == 200;
     } catch (e) {
-      // 网络错误时，不标记为无效，而是保持未验证状态
-      debugPrint('Network error during validation: $e');
+      debugPrint('Validation network error: $e');
       return false;
     }
   }
@@ -395,12 +395,14 @@ main();
         },
         body: utf8.encode(jsonEncode({
           'model': config.modelId,
-          'input': {'messages': [{'role': 'user', 'content': 'hi'}]},
+          'messages': [{'role': 'user', 'content': 'hi'}],
+          'max_tokens': 5,
         })),
-      ).timeout(const Duration(seconds: 10));
+      ).timeout(_validateTimeout);
       
       return response.statusCode == 200;
     } catch (e) {
+      debugPrint('Qwen validation error: $e');
       return false;
     }
   }
@@ -420,10 +422,11 @@ main();
         body: utf8.encode(jsonEncode({
           'contents': [{'parts': [{'text': 'hi'}]}]
         })),
-      ).timeout(const Duration(seconds: 10));
+      ).timeout(_validateTimeout);
       
       return response.statusCode == 200;
     } catch (e) {
+      debugPrint('Gemini validation error: $e');
       return false;
     }
   }
@@ -443,66 +446,13 @@ main();
           'max_tokens': 10,
           'messages': [{'role': 'user', 'content': 'hi'}],
         })),
-      ).timeout(const Duration(seconds: 10));
+      ).timeout(_validateTimeout);
       
       return response.statusCode == 200;
     } catch (e) {
+      debugPrint('Claude validation error: $e');
       return false;
     }
-  }
-
-  /// 识别用户意图
-  AIIntent recognizeIntent(String message) {
-    final lowerMessage = message.toLowerCase();
-    
-    // 创建项目意图
-    if (lowerMessage.contains('创建') && 
-        (lowerMessage.contains('项目') || lowerMessage.contains('工程'))) {
-      String template = 'flutter';
-      if (lowerMessage.contains('python')) template = 'python';
-      if (lowerMessage.contains('node') || lowerMessage.contains('nodejs')) template = 'nodejs';
-      
-      // 尝试提取项目名称
-      String projectName = 'my_project';
-      final nameMatch = RegExp(r'(?:叫|名称|名字为?|名为)([^，,。\s]+)').firstMatch(message);
-      if (nameMatch != null) {
-        projectName = nameMatch.group(1) ?? 'my_project';
-      }
-      
-      return AIIntent(
-        type: AIIntentType.createProject,
-        params: {'template': template, 'name': projectName},
-      );
-    }
-    
-    // 生成代码意图
-    if (lowerMessage.contains('生成') && 
-        (lowerMessage.contains('代码') || lowerMessage.contains('写'))) {
-      String language = 'dart';
-      if (lowerMessage.contains('python') || lowerMessage.contains('.py')) language = 'python';
-      if (lowerMessage.contains('java')) language = 'java';
-      if (lowerMessage.contains('javascript') || lowerMessage.contains('.js')) language = 'javascript';
-      if (lowerMessage.contains('go') || lowerMessage.contains('.go')) language = 'go';
-      
-      return AIIntent(
-        type: AIIntentType.generateCode,
-        params: {'language': language, 'description': message},
-      );
-    }
-    
-    // 解释代码意图
-    if (lowerMessage.contains('解释') || 
-        lowerMessage.contains('说明') ||
-        lowerMessage.contains('看懂')) {
-      if (lowerMessage.contains('代码')) {
-        return AIIntent(
-          type: AIIntentType.explainCode,
-          params: {},
-        );
-      }
-    }
-    
-    return AIIntent(type: AIIntentType.chat, params: {});
   }
 
   /// 创建项目
@@ -513,7 +463,6 @@ main();
     }
     
     try {
-      // 创建项目目录
       final dir = Directory(projectPath);
       if (await dir.exists()) {
         return '目录已存在: $projectPath';
@@ -521,7 +470,6 @@ main();
       
       await dir.create(recursive: true);
       
-      // 创建所有文件
       for (final entry in template.files.entries) {
         final filePath = p.join(projectPath, entry.key);
         final file = File(filePath);
@@ -529,7 +477,6 @@ main();
         await file.writeAsString(entry.value);
       }
       
-      // 回调通知
       onProjectCreated?.call(projectPath);
       
       return '项目已创建: $projectPath\n\n模板: ${template.name}\n文件数: ${template.files.length}';
@@ -545,7 +492,6 @@ main();
     }
     
     try {
-      // 向AI询问项目结构
       final prompt = '''请为以下项目生成代码结构：
       
 描述: $description
@@ -564,20 +510,16 @@ main();
       
       final response = await chat(prompt);
       
-      // 解析AI响应并创建文件
       final filePattern = RegExp(r'【文件:\s*(.+?)】(.*?)【文件结束】', dotAll: true);
       final matches = filePattern.allMatches(response);
       
       if (matches.isEmpty) {
-        // 没有找到文件格式，返回原始响应
         return response;
       }
       
-      // 创建项目目录
       final dir = Directory(projectPath);
       await dir.create(recursive: true);
       
-      // 创建每个文件
       for (final match in matches) {
         final filePath = match.group(1)?.trim() ?? '';
         final content = match.group(2)?.trim() ?? '';
@@ -590,7 +532,6 @@ main();
         }
       }
       
-      // 回调通知
       onProjectCreated?.call(projectPath);
       
       return '项目已创建: $projectPath\n\n共生成 ${matches.length} 个文件';
@@ -614,7 +555,6 @@ main();
       
       final response = await chat(prompt);
       
-      // 如果AI生成了代码，触发回调
       if (response.contains('```')) {
         onCodeGenerated?.call(language, response);
       }
@@ -637,12 +577,12 @@ main();
     }
 
     try {
-      debugPrint('Sending request to ${config.name}...');
+      debugPrint('Sending request to ${config.name} at ${config.apiEndpoint}...');
       String response;
       
       switch (config.provider) {
         case 'deepseek':
-          response = await _chatDeepSeek(config, userMessage, history);
+          response = await _chatOpenAICompatible(config, userMessage, history);
           break;
         case 'qwen':
           response = await _chatQwen(config, userMessage, history);
@@ -660,92 +600,100 @@ main();
           response = await _chatOllama(config, userMessage, history);
           break;
         case 'openai':
-          response = await _chatOpenAI(config, userMessage, history);
+          response = await _chatOpenAICompatible(config, userMessage, history);
+          break;
+        case 'doubao':
+          response = await _chatOpenAICompatible(config, userMessage, history);
+          break;
+        case 'minimax':
+          response = await _chatOpenAICompatible(config, userMessage, history);
           break;
         default:
-          response = await _chatDeepSeek(config, userMessage, history);
+          response = await _chatOpenAICompatible(config, userMessage, history);
       }
       
-      debugPrint('Response received');
+      debugPrint('Response received from ${config.name}');
       return response;
     } catch (e) {
       debugPrint('Chat error: $e');
-      final errorStr = e.toString().toLowerCase();
-      
-      // 区分不同类型的错误，提供更准确的提示
-      if (errorStr.contains('socketexception') || 
-          errorStr.contains('failed host lookup') ||
-          errorStr.contains('no address associated with hostname') ||
-          errorStr.contains('dns') ||
-          errorStr.contains('lookup failed')) {
-        return '⚠️ 网络DNS解析失败\n\n'
-            '无法连接到 ${config.name} 的服务器\n\n'
-            '可能原因:\n'
-            '1. 网络DNS服务器无法解析域名\n'
-            '2. 当前网络存在限制或阻断\n'
-            '3. 如果使用VPN/代理，请检查设置\n\n'
-            '💡 建议:\n'
-            '• 切换到手机数据或其他WiFi网络\n'
-            '• 尝试使用其他模型（DeepSeek、Qwen、Kimi等）\n'
-            '• 联系网络管理员解除限制\n\n'
-            '错误详情: $e';
-      } else if (errorStr.contains('timed out') || errorStr.contains('timeout')) {
-        return '⏱️ 请求超时\n\n'
-            '服务器响应时间过长\n\n'
-            '可能原因:\n'
-            '1. 网络连接不稳定\n'
-            '2. 服务器负载过高\n'
-            '3. 网络环境较差\n\n'
-            '💡 建议:\n'
-            '• 检查网络连接后重试\n'
-            '• 稍后再试\n'
-            '• 尝试使用其他模型';
-      } else if (errorStr.contains('connection refused') || 
-                 errorStr.contains('connection failed') ||
-                 errorStr.contains('connection error')) {
-        return '🔌 连接失败\n\n'
-            '无法连接到服务器\n\n'
-            '可能原因:\n'
-            '1. 网络环境受限\n'
-            '2. 服务器暂时不可用\n'
-            '3. 防火墙或代理阻止了请求\n\n'
-            '💡 建议:\n'
-            '• 检查网络设置\n'
-            '• 尝试使用其他模型（DeepSeek、Qwen等）';
-      } else if (errorStr.contains('401') || 
-                 errorStr.contains('unauthorized') ||
-                 errorStr.contains('invalid api key')) {
-        return '🔑 API Key 认证失败\n\n'
-            '请检查 API Key 是否正确配置\n\n'
-            '可能原因:\n'
-            '1. API Key 填写错误\n'
-            '2. API Key 已过期或被禁用\n'
-            '3. 账户余额不足\n\n'
-            '💡 建议:\n'
-            '• 前往设置重新配置 API Key\n'
-            '• 确认 Key 没有多余空格\n'
-            '• 检查服务商账户状态\n\n'
-            '获取地址: ${_getKeyUrl(config.name)}';
-      } else if (errorStr.contains('403') || errorStr.contains('forbidden')) {
-        return '🚫 访问被拒绝\n\n'
-            '服务器拒绝了这个请求\n\n'
-            '可能原因:\n'
-            '1. 账户权限不足\n'
-            '2. 服务区域限制\n'
-            '3. API Key 没有该接口权限\n\n'
-            '💡 建议:\n'
-            '• 检查账户权限和余额\n'
-            '• 尝试使用其他模型';
-      } else {
-        return '❌ 请求失败\n\n'
-            '发生了未知错误\n\n'
-            '错误信息: $e\n\n'
-            '💡 建议:\n'
-            '• 检查网络连接\n'
-            '• 尝试使用其他模型（DeepSeek、Qwen、Kimi）\n'
-            '• 查看 API Key 设置是否正确';
-      }
+      return _formatError(e, config);
     }
+  }
+  
+  /// 格式化错误信息
+  String _formatError(dynamic e, AIModelConfig config) {
+    final errorStr = e.toString().toLowerCase();
+    
+    // DNS解析失败
+    if (errorStr.contains('socketexception') || 
+        errorStr.contains('failed host lookup') ||
+        errorStr.contains('no address associated with hostname')) {
+      return '⚠️ 网络连接失败\n\n'
+          '无法连接到 ${config.name} 服务器\n'
+          '域名: ${Uri.parse(config.apiEndpoint).host}\n\n'
+          '可能原因:\n'
+          '• 当前网络DNS无法解析该域名\n'
+          '• 网络环境存在限制\n'
+          '• 服务暂时不可用\n\n'
+          '建议:\n'
+          '1. 切换网络（WiFi/数据）重试\n'
+          '2. 尝试使用其他模型\n'
+          '   • DeepSeek（国内访问稳定）\n'
+          '   • 通义千问（阿里云）\n'
+          '   • 豆包（字节跳动）';
+    }
+    
+    // 超时
+    if (errorStr.contains('timed out') || errorStr.contains('timeout')) {
+      return '⏱️ 请求超时\n\n'
+          '服务器响应时间过长\n\n'
+          '建议:\n'
+          '• 检查网络连接\n'
+          '• 稍后重试\n'
+          '• 尝试使用其他模型';
+    }
+    
+    // 连接被拒绝
+    if (errorStr.contains('connection refused') || 
+        errorStr.contains('connection failed')) {
+      return '🔌 连接失败\n\n'
+          '无法建立连接\n\n'
+          '建议:\n'
+          '• 检查网络设置\n'
+          '• 尝试切换网络\n'
+          '• 使用其他模型';
+    }
+    
+    // API Key 错误
+    if (errorStr.contains('401') || errorStr.contains('unauthorized')) {
+      return '🔑 API Key 认证失败\n\n'
+          '请检查 API Key 是否正确\n\n'
+          '建议:\n'
+          '• 前往设置重新配置\n'
+          '• 确认 Key 没有多余空格\n'
+          '• 检查账户余额\n\n'
+          '获取地址: ${_getKeyUrl(config.name)}';
+    }
+    
+    // 权限错误
+    if (errorStr.contains('403') || errorStr.contains('forbidden')) {
+      return '🚫 访问被拒绝\n\n'
+          '可能原因:\n'
+          '• 账户权限不足\n'
+          '• 服务区域限制\n'
+          '• API Key 无此权限\n\n'
+          '建议:\n'
+          '• 检查账户状态\n'
+          '• 尝试其他模型';
+    }
+    
+    // 其他错误
+    return '❌ 请求失败\n\n'
+        '错误信息: $e\n\n'
+        '建议:\n'
+        '• 检查网络连接\n'
+        '• 尝试其他模型\n'
+        '• 检查 API Key 设置';
   }
 
   String _getKeyUrl(String modelName) {
@@ -762,8 +710,8 @@ main();
     return urls[modelName] ?? '';
   }
 
-  /// DeepSeek API
-  Future<String> _chatDeepSeek(
+  /// OpenAI 兼容 API（DeepSeek, OpenAI, 豆包, Minimax 等）
+  Future<String> _chatOpenAICompatible(
     AIModelConfig config,
     String userMessage,
     List<AIMessage>? history,
@@ -786,9 +734,9 @@ main();
         'temperature': 0.7,
         'max_tokens': 4096,
       })),
-    );
+    ).timeout(_timeout);
 
-    debugPrint('DeepSeek response status: ${response.statusCode}');
+    debugPrint('${config.name} response status: ${response.statusCode}');
     
     if (response.statusCode == 200) {
       final body = utf8.decode(response.bodyBytes);
@@ -800,8 +748,44 @@ main();
     }
   }
 
-  /// OpenAI API
-  Future<String> _chatOpenAI(
+  /// 通义千问API
+  Future<String> _chatQwen(
+    AIModelConfig config,
+    String userMessage,
+    List<AIMessage>? history,
+  ) async {
+    final messages = <Map<String, dynamic>>[
+      {'role': 'system', 'content': '你是一个专业的编程助手，帮助用户解决代码问题。请用中文回答。'},
+      if (history != null) ...history.map((m) => m.toJson()),
+      {'role': 'user', 'content': userMessage},
+    ];
+
+    final response = await http.post(
+      Uri.parse(config.apiEndpoint),
+      headers: {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Authorization': 'Bearer $_apiKey',
+      },
+      body: utf8.encode(jsonEncode({
+        'model': config.modelId,
+        'messages': messages,
+        'temperature': 0.7,
+        'max_tokens': 4096,
+      })),
+    ).timeout(_timeout);
+
+    if (response.statusCode == 200) {
+      final body = utf8.decode(response.bodyBytes);
+      final data = jsonDecode(body);
+      return data['choices'][0]['message']['content'] ?? '无响应';
+    } else {
+      final body = utf8.decode(response.bodyBytes);
+      return 'API错误 (${response.statusCode}): $body';
+    }
+  }
+
+  /// 智谱清言API
+  Future<String> _chatZhipu(
     AIModelConfig config,
     String userMessage,
     List<AIMessage>? history,
@@ -824,75 +808,7 @@ main();
         'temperature': 0.7,
         'max_tokens': 4096,
       })),
-    );
-
-    if (response.statusCode == 200) {
-      final body = utf8.decode(response.bodyBytes);
-      final data = jsonDecode(body);
-      return data['choices'][0]['message']['content'] ?? '无响应';
-    } else {
-      final body = utf8.decode(response.bodyBytes);
-      return 'API错误 (${response.statusCode}): $body';
-    }
-  }
-
-  /// 通义千问API
-  Future<String> _chatQwen(
-    AIModelConfig config,
-    String userMessage,
-    List<AIMessage>? history,
-  ) async {
-    final response = await http.post(
-      Uri.parse(config.apiEndpoint),
-      headers: {
-        'Content-Type': 'application/json; charset=utf-8',
-        'Authorization': 'Bearer $_apiKey',
-      },
-      body: utf8.encode(jsonEncode({
-        'model': config.modelId,
-        'input': {
-          'messages': [
-            {'role': 'system', 'content': '你是一个专业的编程助手。'},
-            {'role': 'user', 'content': userMessage},
-          ],
-        },
-      })),
-    );
-
-    if (response.statusCode == 200) {
-      final body = utf8.decode(response.bodyBytes);
-      final data = jsonDecode(body);
-      if (data['output'] != null) {
-        return data['output']['text'] ?? 
-               data['output']['choices']?[0]?['message']?['content'] ?? 
-               '无响应';
-      }
-      return '响应格式错误: $body';
-    } else {
-      final body = utf8.decode(response.bodyBytes);
-      return 'API错误 (${response.statusCode}): $body';
-    }
-  }
-
-  /// 智谱清言API
-  Future<String> _chatZhipu(
-    AIModelConfig config,
-    String userMessage,
-    List<AIMessage>? history,
-  ) async {
-    final response = await http.post(
-      Uri.parse(config.apiEndpoint),
-      headers: {
-        'Content-Type': 'application/json; charset=utf-8',
-        'Authorization': 'Bearer $_apiKey',
-      },
-      body: utf8.encode(jsonEncode({
-        'model': config.modelId,
-        'messages': [
-          {'role': 'user', 'content': userMessage},
-        ],
-      })),
-    );
+    ).timeout(_timeout);
 
     if (response.statusCode == 200) {
       final body = utf8.decode(response.bodyBytes);
@@ -924,7 +840,7 @@ main();
           }
         ]
       })),
-    );
+    ).timeout(_timeout);
 
     if (response.statusCode == 200) {
       final body = utf8.decode(response.bodyBytes);
@@ -942,6 +858,11 @@ main();
     String userMessage,
     List<AIMessage>? history,
   ) async {
+    final messages = <Map<String, dynamic>>[
+      if (history != null) ...history.map((m) => m.toJson()),
+      {'role': 'user', 'content': userMessage},
+    ];
+
     final response = await http.post(
       Uri.parse(config.apiEndpoint),
       headers: {
@@ -952,11 +873,9 @@ main();
       body: utf8.encode(jsonEncode({
         'model': config.modelId,
         'max_tokens': 4096,
-        'messages': [
-          {'role': 'user', 'content': userMessage}
-        ],
+        'messages': messages,
       })),
-    );
+    ).timeout(_timeout);
 
     if (response.statusCode == 200) {
       final body = utf8.decode(response.bodyBytes);
@@ -974,17 +893,19 @@ main();
     String userMessage,
     List<AIMessage>? history,
   ) async {
+    final messages = <Map<String, dynamic>>[
+      {'role': 'user', 'content': userMessage}
+    ];
+
     final response = await http.post(
       Uri.parse(config.apiEndpoint),
       headers: {'Content-Type': 'application/json; charset=utf-8'},
       body: utf8.encode(jsonEncode({
         'model': config.modelId,
-        'messages': [
-          {'role': 'user', 'content': userMessage}
-        ],
+        'messages': messages,
         'stream': false,
       })),
-    );
+    ).timeout(_timeout);
 
     if (response.statusCode == 200) {
       final body = utf8.decode(response.bodyBytes);
@@ -995,129 +916,11 @@ main();
     }
   }
 
-  /// 流式聊天 - 逐字返回响应
+  /// 流式聊天
   Stream<String> chatStream(String userMessage, {List<AIMessage>? history}) async* {
-    final config = _models[_selectedModel];
-    if (config == null) {
-      yield '错误：未知的模型配置';
-      return;
-    }
-
-    if (_apiKey.isEmpty && config.provider != 'ollama') {
-      yield '请先配置 API Key';
-      return;
-    }
-
-    try {
-      debugPrint('Starting stream request to ${config.name}...');
-      
-      // 根据不同的提供商使用不同的流式方法
-      switch (config.provider) {
-        case 'deepseek':
-        case 'openai':
-          yield* _streamOpenAICompatible(config, userMessage, history);
-          break;
-        case 'zhipu':
-          yield* _streamZhipu(config, userMessage, history);
-          break;
-        default:
-          // 不支持流式的模型，使用普通方法并逐字返回
-          final response = await chat(userMessage, history: history);
-          for (int i = 0; i < response.length; i++) {
-            await Future.delayed(const Duration(milliseconds: 20));
-            yield response.substring(0, i + 1);
-          }
-      }
-    } catch (e) {
-      debugPrint('Stream error: $e');
-      yield '请求失败: $e';
-    }
-  }
-
-  /// OpenAI 兼容 API 流式请求
-  Stream<String> _streamOpenAICompatible(
-    AIModelConfig config,
-    String userMessage,
-    List<AIMessage>? history,
-  ) async* {
-    final messages = <Map<String, dynamic>>[
-      {'role': 'system', 'content': '你是一个专业的编程助手，帮助用户解决代码问题。请用中文回答。'},
-      if (history != null) ...history.map((m) => m.toJson()),
-      {'role': 'user', 'content': userMessage},
-    ];
-
-    final request = http.Request('POST', Uri.parse(config.apiEndpoint));
-    request.headers['Content-Type'] = 'application/json; charset=utf-8';
-    request.headers['Authorization'] = 'Bearer $_apiKey';
-    request.bodyBytes = utf8.encode(jsonEncode({
-      'model': config.modelId,
-      'messages': messages,
-      'stream': true,
-      'temperature': 0.7,
-      'max_tokens': 4096,
-    }));
-
-    final response = await http.Client().send(request);
-    
-    await for (final chunk in response.stream.transform(utf8.decoder)) {
-      final lines = chunk.split('\n');
-      for (final line in lines) {
-        if (line.startsWith('data: ')) {
-          final data = line.substring(6).trim();
-          if (data == '[DONE]') return;
-          
-          try {
-            final json = jsonDecode(data);
-            final content = json['choices']?[0]?['delta']?['content'];
-            if (content != null) {
-              yield content;
-            }
-          } catch (e) {
-            // 解析错误，忽略
-          }
-        }
-      }
-    }
-  }
-
-  /// 智谱 API 流式请求
-  Stream<String> _streamZhipu(
-    AIModelConfig config,
-    String userMessage,
-    List<AIMessage>? history,
-  ) async* {
-    final request = http.Request('POST', Uri.parse(config.apiEndpoint));
-    request.headers['Content-Type'] = 'application/json; charset=utf-8';
-    request.headers['Authorization'] = 'Bearer $_apiKey';
-    request.bodyBytes = utf8.encode(jsonEncode({
-      'model': config.modelId,
-      'messages': [
-        {'role': 'user', 'content': userMessage}
-      ],
-      'stream': true,
-    }));
-
-    final response = await http.Client().send(request);
-    
-    await for (final chunk in response.stream.transform(utf8.decoder)) {
-      final lines = chunk.split('\n');
-      for (final line in lines) {
-        if (line.startsWith('data: ')) {
-          final data = line.substring(6).trim();
-          if (data == '[DONE]') return;
-          
-          try {
-            final json = jsonDecode(data);
-            final content = json['choices']?[0]?['delta']?['content'];
-            if (content != null) {
-              yield content;
-            }
-          } catch (e) {
-            // 解析错误，忽略
-          }
-        }
-      }
-    }
+    // 暂不支持流式，直接返回普通响应
+    final response = await chat(userMessage, history: history);
+    yield response;
   }
 
   /// AI 编辑代码
@@ -1183,23 +986,43 @@ $code
 
 语言: ${language.isEmpty ? '自动检测' : language}
 
-代码:
 ```
 $code
 ```
 
-${error != null ? '错误信息:\n$error' : ''}
+${error != null ? '错误信息: $error' : ''}
 
-请：
-1. 找出所有问题
-2. 修复这些问题
-3. 确保代码能正常编译和运行
-
-请只返回修复后的代码，不要添加解释。''';
+请分析问题并提供修复后的完整代码，并简要说明修复内容。''';
 
     return await chat(prompt);
   }
 }
 
-// 全局实例
-final aiService = AIService();
+/// 全局AI服务实例
+final AIService aiService = AIService();
+
+/// 聊天消息
+class ChatMessage {
+  final String content;
+  final bool isUser;
+  final DateTime timestamp;
+  
+  ChatMessage({
+    required this.content,
+    required this.isUser,
+    DateTime? timestamp,
+  }) : timestamp = timestamp ?? DateTime.now();
+}
+
+/// 已保存的文件
+class SavedFile {
+  final String path;
+  final String language;
+  final DateTime savedAt;
+  
+  SavedFile({
+    required this.path,
+    required this.language,
+    DateTime? savedAt,
+  }) : savedAt = savedAt ?? DateTime.now();
+}

@@ -23,7 +23,9 @@ class CodeEditorPage extends StatefulWidget {
 class _CodeEditorPageState extends State<CodeEditorPage> {
   final TextEditingController _controller = TextEditingController();
   final ScrollController _scrollController = ScrollController();
+  final ScrollController _lineNumberScrollController = ScrollController();
   final List<EditorTab> _tabs = [];
+  final FocusNode _editorFocusNode = FocusNode();
   int _currentTabIndex = 0;
   bool _hasChanges = false;
   String _currentFilePath = '';
@@ -45,6 +47,14 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
     if (widget.filePath != null) {
       _loadFile(widget.filePath!);
     }
+    // 同步行号和编辑器滚动
+    _scrollController.addListener(_syncLineNumberScroll);
+  }
+
+  void _syncLineNumberScroll() {
+    if (_lineNumberScrollController.hasClients) {
+      _lineNumberScrollController.jumpTo(_scrollController.offset);
+    }
   }
 
   @override
@@ -52,6 +62,8 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
     _autoSaveTimer?.cancel();
     _controller.dispose();
     _scrollController.dispose();
+    _lineNumberScrollController.dispose();
+    _editorFocusNode.dispose();
     super.dispose();
   }
 
@@ -217,20 +229,71 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
                             ],
                           ),
                         )
-                      : TextField(
-                          controller: _controller,
-                          maxLines: null,
-                          expands: true,
-                          style: const TextStyle(
-                            fontFamily: 'monospace',
-                            fontSize: 14,
-                            height: 1.5,
-                          ),
-                          decoration: const InputDecoration(
-                            border: InputBorder.none,
-                            contentPadding: EdgeInsets.all(16),
-                          ),
-                          onChanged: (_) => _onContentChanged(),
+                      : Row(
+                          children: [
+                            // 行号面板
+                            Container(
+                              width: 50,
+                              color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                              child: ListView.builder(
+                                controller: _lineNumberScrollController,
+                                physics: const BouncingScrollPhysics(),
+                                itemCount: _getLineCount(),
+                                itemBuilder: (context, index) {
+                                  return Container(
+                                    height: 21, // 匹配1.5倍行高(14px)
+                                    alignment: Alignment.centerRight,
+                                    padding: const EdgeInsets.only(right: 8),
+                                    child: Text(
+                                      '${index + 1}',
+                                      style: TextStyle(
+                                        fontFamily: 'monospace',
+                                        fontSize: 14,
+                                        height: 1.5,
+                                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                      ),
+                                    ),
+                                  );
+                                },
+                              ),
+                            ),
+                            // 分隔线
+                            Container(
+                              width: 1,
+                              color: Theme.of(context).dividerColor,
+                            ),
+                            // 代码编辑区 - 支持横向滚动
+                            Expanded(
+                              child: SingleChildScrollView(
+                                controller: _scrollController,
+                                physics: const BouncingScrollPhysics(),
+                                child: SingleChildScrollView(
+                                  scrollDirection: Axis.horizontal,
+                                  physics: const BouncingScrollPhysics(),
+                                  child: SizedBox(
+                                    width: MediaQuery.of(context).size.width * 2, // 足够宽以支持长行
+                                    child: TextField(
+                                      controller: _controller,
+                                      focusNode: _editorFocusNode,
+                                      maxLines: null,
+                                      expands: false,
+                                      scrollPhysics: const BouncingScrollPhysics(),
+                                      style: const TextStyle(
+                                        fontFamily: 'monospace',
+                                        fontSize: 14,
+                                        height: 1.5,
+                                      ),
+                                      decoration: const InputDecoration(
+                                        border: InputBorder.none,
+                                        contentPadding: EdgeInsets.all(16),
+                                      ),
+                                      onChanged: (_) => _onContentChanged(),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                 ),
               ],

@@ -378,6 +378,8 @@ main();
       
       return response.statusCode == 200;
     } catch (e) {
+      // 网络错误时，不标记为无效，而是保持未验证状态
+      debugPrint('Network error during validation: $e');
       return false;
     }
   }
@@ -620,6 +622,30 @@ main();
       return response;
     } catch (e) {
       return '生成失败: $e';
+    }
+  }
+
+  /// 解释代码
+  Future<String> explainCode(String code) async {
+    if (!isConfigured) {
+      return '请先配置AI API Key';
+    }
+    
+    try {
+      final prompt = '''请解释以下代码的功能和工作原理：
+
+```
+$code
+```
+
+请用简洁易懂的语言解释，包括：
+1. 代码的主要功能
+2. 关键代码段的作用
+3. 代码的运行流程''';
+      
+      return await chat(prompt);
+    } catch (e) {
+      return '解释失败: $e';
     }
   }
 

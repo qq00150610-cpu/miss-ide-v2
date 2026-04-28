@@ -348,26 +348,30 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
                             child: Row(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                // 行号面板 - 与代码区同一滚动容器，确保对齐
+                                // 行号面板 - 动态宽度以支持更多行号
                                 if (_editorSettings.showLineNumbers)
                                   Container(
-                                    width: 50,
+                                    // 动态计算宽度：基于最大行号位数，最少50px，最多80px
+                                    width: _calculateLineNumberWidth(),
                                     color: _editorSettings.backgroundColor.withOpacity(0.95),
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.end,
-                                      children: List.generate(
-                                        _getLineCount(),
-                                        (index) => Container(
-                                          height: _editorSettings.fontSize * _editorSettings.lineHeight,
-                                          alignment: Alignment.centerRight,
-                                          padding: const EdgeInsets.only(right: 8),
-                                          child: Text(
-                                            '${index + 1}',
-                                            style: TextStyle(
-                                              fontFamily: 'monospace',
-                                              fontSize: _editorSettings.fontSize,
-                                              height: _editorSettings.lineHeight,
-                                              color: _editorSettings.textColor.withOpacity(0.5),
+                                    child: SingleChildScrollView(
+                                      physics: const NeverScrollableScrollPhysics(),
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.end,
+                                        children: List.generate(
+                                          _getLineCount(),
+                                          (index) => Container(
+                                            height: _editorSettings.fontSize * _editorSettings.lineHeight,
+                                            alignment: Alignment.centerRight,
+                                            padding: const EdgeInsets.only(right: 8),
+                                            child: Text(
+                                              '${index + 1}',
+                                              style: TextStyle(
+                                                fontFamily: 'monospace',
+                                                fontSize: _editorSettings.fontSize,
+                                                height: _editorSettings.lineHeight,
+                                                color: _editorSettings.textColor.withOpacity(0.5),
+                                              ),
                                             ),
                                           ),
                                         ),
@@ -377,10 +381,9 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
                                 // 分隔线
                                 Container(
                                   width: 1,
-                                  height: _getLineCount() * _editorSettings.fontSize * _editorSettings.lineHeight,
                                   color: _editorSettings.textColor.withOpacity(0.2),
                                 ),
-                                // 代码编辑区 - 使用语法高亮
+                                // 代码编辑区 - 支持自动换行
                                 Expanded(
                                   child: Container(
                                     color: _editorSettings.backgroundColor,
@@ -400,13 +403,13 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
     );
   }
   
-  /// 构建代码编辑器 - 支持语法高亮
+  /// 构建代码编辑器 - 支持语法高亮和自动换行
   Widget _buildCodeEditor() {
     if (_syntaxHighlightingEnabled && _highlightedSpans.isNotEmpty) {
       // 使用语法高亮模式
       return Stack(
         children: [
-          // 高亮文本层（只读，用于显示）
+          // 高亮文本层（只读，用于显示）- 支持自动换行
           Positioned.fill(
             child: IgnorePointer(
               child: SingleChildScrollView(
@@ -414,6 +417,7 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
                 child: Padding(
                   padding: const EdgeInsets.all(16),
                   child: RichText(
+                    softWrap: true, // 启用自动换行
                     text: TextSpan(
                       children: _highlightedSpans,
                       style: TextStyle(
@@ -427,7 +431,7 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
               ),
             ),
           ),
-          // 透明输入层（用于输入）
+          // 透明输入层（用于输入）- 支持自动换行
           Positioned.fill(
             child: TextField(
               controller: _controller,
@@ -437,6 +441,7 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
               readOnly: false,
               maxLines: null,
               expands: false,
+              softWrap: true, // 启用自动换行
               keyboardType: TextInputType.multiline,
               textInputAction: TextInputAction.newline,
               scrollPhysics: const NeverScrollableScrollPhysics(),
@@ -458,7 +463,7 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
         ],
       );
     } else {
-      // 普通模式（无语法高亮）
+      // 普通模式（无语法高亮）- 支持自动换行
       return TextField(
         controller: _controller,
         focusNode: _editorFocusNode,
@@ -467,6 +472,7 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
         readOnly: false,
         maxLines: null,
         expands: false,
+        softWrap: true, // 启用自动换行
         keyboardType: TextInputType.multiline,
         textInputAction: TextInputAction.newline,
         scrollPhysics: const NeverScrollableScrollPhysics(),
@@ -538,6 +544,17 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
     final text = _controller.text;
     if (text.isEmpty) return 1;
     return text.split('\n').length;
+  }
+
+  /// 计算行号面板宽度，基于最大行号位数动态调整
+  double _calculateLineNumberWidth() {
+    final lineCount = _getLineCount();
+    // 计算行号的位数
+    final digits = lineCount.toString().length;
+    // 每个数字大约8px宽度，加上8px的padding
+    final width = (digits * 10.0) + 16;
+    // 限制在50-80之间
+    return width.clamp(50.0, 80.0);
   }
 
   int _getCurrentLine() {

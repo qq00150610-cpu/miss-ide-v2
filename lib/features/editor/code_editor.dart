@@ -923,8 +923,8 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               child: Text(
                 '选择文件编码',
                 style: TextStyle(
@@ -934,7 +934,7 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
                 ),
               ),
             ),
-            const Divider(color: _colors.borderColor),
+            Divider(color: _colors.borderColor),
             ...EncodingTypes.commonEncodings.entries.map((entry) {
               final isSelected = entry.key == _currentEncoding;
               return ListTile(

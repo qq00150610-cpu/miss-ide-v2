@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'theme.dart';
 import 'package:miss_ide/features/editor/code_editor.dart';
 import 'package:miss_ide/features/ai/ai_chat.dart';
@@ -8,18 +9,36 @@ import 'package:miss_ide/features/file_manager/file_browser.dart';
 import 'package:miss_ide/features/project/project_page.dart';
 import 'package:miss_ide/features/build/build.dart';
 
+/// 全局主题模式通知器
+final ValueNotifier<ThemeMode> themeModeNotifier = ValueNotifier(ThemeMode.system);
+
+/// 初始化主题设置
+Future<void> initThemeMode() async {
+  const storage = FlutterSecureStorage();
+  final savedMode = await storage.read(key: 'theme_mode');
+  if (savedMode != null) {
+    final index = int.tryParse(savedMode) ?? 0;
+    themeModeNotifier.value = ThemeMode.values[index];
+  }
+}
+
 class MissIDEApp extends StatelessWidget {
   const MissIDEApp({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Miss IDE v2',
-      debugShowCheckedModeBanner: false,
-      theme: AppTheme.light,
-      darkTheme: AppTheme.dark,
-      themeMode: ThemeMode.system,
-      home: const MainPage(),
+    return ValueListenableBuilder<ThemeMode>(
+      valueListenable: themeModeNotifier,
+      builder: (context, mode, child) {
+        return MaterialApp(
+          title: 'Miss IDE v2',
+          debugShowCheckedModeBanner: false,
+          theme: AppTheme.light,
+          darkTheme: AppTheme.dark,
+          themeMode: mode,
+          home: const MainPage(),
+        );
+      },
     );
   }
 }

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:miss_ide/app/app.dart';
 import '../ai/ai_service.dart';
 import '../build/build_service.dart';
 
@@ -12,7 +13,7 @@ class SettingsPage extends StatefulWidget {
 }
 
 class _SettingsPageState extends State<SettingsPage> {
-  bool _darkMode = false;
+  ThemeMode _themeMode = ThemeMode.system;
   String _githubTokenStatus = '未配置';
   final _storage = const FlutterSecureStorage();
 
@@ -33,6 +34,17 @@ class _SettingsPageState extends State<SettingsPage> {
     super.initState();
     _initService();
     _loadGitHubTokenStatus();
+    _loadThemeMode();
+  }
+
+  Future<void> _loadThemeMode() async {
+    final savedMode = await _storage.read(key: 'theme_mode');
+    if (mounted && savedMode != null) {
+      final index = int.tryParse(savedMode) ?? 0;
+      setState(() {
+        _themeMode = ThemeMode.values[index];
+      });
+    }
   }
 
   Future<void> _loadGitHubTokenStatus() async {
@@ -138,16 +150,12 @@ class _SettingsPageState extends State<SettingsPage> {
           _buildSection(
             '外观',
             [
-              SwitchListTile(
-                secondary: const Icon(Icons.dark_mode),
-                title: const Text('深色模式'),
-                subtitle: const Text('跟随系统设置'),
-                value: _darkMode,
-                onChanged: (value) {
-                  setState(() {
-                    _darkMode = value;
-                  });
-                },
+              ListTile(
+                leading: const Icon(Icons.palette),
+                title: const Text('主题模式'),
+                subtitle: Text(_getThemeModeLabel(_themeMode)),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => _showThemeSelector(),
               ),
             ],
           ),
@@ -366,5 +374,84 @@ class _SettingsPageState extends State<SettingsPage> {
         ],
       ),
     );
+  }
+
+  String _getThemeModeLabel(ThemeMode mode) {
+    switch (mode) {
+      case ThemeMode.system:
+        return '跟随系统';
+      case ThemeMode.light:
+        return '浅色模式';
+      case ThemeMode.dark:
+        return '深色模式';
+    }
+  }
+
+  void _showThemeSelector() {
+    showModalBottomSheet(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: Text('选择主题', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            ),
+            ListTile(
+              leading: Icon(
+                _themeMode == ThemeMode.system 
+                  ? Icons.radio_button_checked 
+                  : Icons.radio_button_off,
+                color: _themeMode == ThemeMode.system 
+                  ? Theme.of(context).colorScheme.primary 
+                  : null,
+              ),
+              title: const Text('跟随系统'),
+              subtitle: const Text('自动适应系统主题设置'),
+              onTap: () => _setThemeMode(ThemeMode.system),
+            ),
+            ListTile(
+              leading: Icon(
+                _themeMode == ThemeMode.light 
+                  ? Icons.radio_button_checked 
+                  : Icons.radio_button_off,
+                color: _themeMode == ThemeMode.light 
+                  ? Theme.of(context).colorScheme.primary 
+                  : null,
+              ),
+              title: const Text('浅色模式'),
+              subtitle: const Text('始终使用浅色主题'),
+              onTap: () => _setThemeMode(ThemeMode.light),
+            ),
+            ListTile(
+              leading: Icon(
+                _themeMode == ThemeMode.dark 
+                  ? Icons.radio_button_checked 
+                  : Icons.radio_button_off,
+                color: _themeMode == ThemeMode.dark 
+                  ? Theme.of(context).colorScheme.primary 
+                  : null,
+              ),
+              title: const Text('深色模式'),
+              subtitle: const Text('始终使用深色主题'),
+              onTap: () => _setThemeMode(ThemeMode.dark),
+            ),
+            const SizedBox(height: 16),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _setThemeMode(ThemeMode mode) {
+    setState(() {
+      _themeMode = mode;
+    });
+    // 更新全局主题
+    themeModeNotifier.value = mode;
+    // 保存设置
+    _storage.write(key: 'theme_mode', value: mode.index.toString());
+    Navigator.pop(context);
   }
 }

@@ -27,6 +27,9 @@ void main() async {
   // 初始化AI服务
   await aiService.init();
   
+  // 初始化主题设置
+  await initThemeMode();
+  
   runApp(
     const ProviderScope(
       child: MissIDEApp(),

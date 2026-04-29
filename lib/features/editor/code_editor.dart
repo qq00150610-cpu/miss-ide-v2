@@ -32,6 +32,98 @@ class VSCodeColors {
   static const Color currentLineHighlight = Color(0xFF264F78);
 }
 
+/// 根据背景色获取动态编辑器颜色
+class DynamicEditorColors {
+  final Color backgroundColor;
+  final Color textColor;
+  
+  DynamicEditorColors({required this.backgroundColor, required this.textColor});
+  
+  /// 判断是否是深色背景
+  bool get isDarkBackground {
+    final luminance = backgroundColor.computeLuminance();
+    return luminance < 0.5;
+  }
+  
+  /// 侧边栏背景色（比主背景稍亮/暗）
+  Color get sidebarBackground {
+    if (isDarkBackground) {
+      return _lightenColor(backgroundColor, 0.05);
+    } else {
+      return _darkenColor(backgroundColor, 0.05);
+    }
+  }
+  
+  /// 标签栏背景
+  Color get tabBackground {
+    if (isDarkBackground) {
+      return _lightenColor(backgroundColor, 0.08);
+    } else {
+      return _darkenColor(backgroundColor, 0.08);
+    }
+  }
+  
+  /// 活动标签背景
+  Color get tabActiveBackground => backgroundColor;
+  
+  /// 文字颜色
+  Color get tabText => textColor;
+  
+  /// 行号颜色（文字颜色的淡化版本）
+  Color get lineNumberColor {
+    if (isDarkBackground) {
+      return textColor.withOpacity(0.5);
+    } else {
+      return textColor.withOpacity(0.4);
+    }
+  }
+  
+  /// 当前行号颜色
+  Color get currentLineNumber => textColor;
+  
+  /// 边框颜色
+  Color get borderColor {
+    if (isDarkBackground) {
+      return _lightenColor(backgroundColor, 0.1);
+    } else {
+      return _darkenColor(backgroundColor, 0.1);
+    }
+  }
+  
+  /// 当前行高亮
+  Color get currentLineHighlight {
+    if (isDarkBackground) {
+      return _lightenColor(backgroundColor, 0.1);
+    } else {
+      return _darkenColor(backgroundColor, 0.05);
+    }
+  }
+  
+  /// 状态栏背景（使用主题色或根据背景计算）
+  Color get statusBarBackground {
+    if (isDarkBackground) {
+      return const Color(0xFF007ACC);
+    } else {
+      return const Color(0xFF007ACC);
+    }
+  }
+  
+  /// 状态栏文字
+  Color get statusBarText => Colors.white;
+  
+  Color _lightenColor(Color color, double amount) {
+    final hsl = HSLColor.fromColor(color);
+    final lightness = (hsl.lightness + amount).clamp(0.0, 1.0);
+    return hsl.withLightness(lightness).toColor();
+  }
+  
+  Color _darkenColor(Color color, double amount) {
+    final hsl = HSLColor.fromColor(color);
+    final lightness = (hsl.lightness - amount).clamp(0.0, 1.0);
+    return hsl.withLightness(lightness).toColor();
+  }
+}
+
 /// 编码类型映射
 class EncodingTypes {
   static const Map<String, String> commonEncodings = {
@@ -89,6 +181,12 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
   
   // 编辑器设置
   EditorSettings _editorSettings = EditorSettings();
+  
+  /// 获取动态编辑器颜色
+  DynamicEditorColors get _colors => DynamicEditorColors(
+    backgroundColor: _editorSettings.backgroundColor,
+    textColor: _editorSettings.textColor,
+  );
 
   @override
   void initState() {
@@ -280,7 +378,7 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
                   width: _isDirectoryExpanded && _currentProjectPath != null ? 200 : 0,
                   child: _isDirectoryExpanded && _currentProjectPath != null
                       ? Container(
-                          color: VSCodeColors.sidebarBackground,
+                          color: _colors.sidebarBackground,
                           child: ProjectDirectoryPanel(
                             projectPath: _currentProjectPath!,
                             onFileSelected: _onFileSelectedFromDirectory,
@@ -299,7 +397,7 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
                       if (_tabs.isNotEmpty)
                         Container(
                           height: 35,
-                          color: VSCodeColors.tabBackground,
+                          color: _colors.tabBackground,
                           child: Row(
                             children: [
                               Expanded(
@@ -317,7 +415,7 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
                                         padding: const EdgeInsets.symmetric(horizontal: 12),
                                         decoration: BoxDecoration(
                                           color: isActive 
-                                              ? VSCodeColors.tabActiveBackground 
+                                              ? _colors.tabActiveBackground 
                                               : Colors.transparent,
                                           border: Border(
                                             top: BorderSide(
@@ -327,7 +425,7 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
                                               width: 2,
                                             ),
                                             right: BorderSide(
-                                              color: VSCodeColors.borderColor,
+                                              color: _colors.borderColor,
                                               width: 1,
                                             ),
                                           ),
@@ -346,7 +444,7 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
                                                 tab.fileName,
                                                 style: TextStyle(
                                                   fontSize: 13,
-                                                  color: VSCodeColors.tabText,
+                                                  color: _colors.tabText,
                                                   fontWeight: isActive ? FontWeight.w500 : FontWeight.normal,
                                                 ),
                                                 overflow: TextOverflow.ellipsis,
@@ -371,7 +469,7 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
                                                 child: Icon(
                                                   Icons.close,
                                                   size: 14,
-                                                  color: VSCodeColors.tabText.withOpacity(0.7),
+                                                  color: _colors.tabText.withOpacity(0.7),
                                                 ),
                                               ),
                                             ),
@@ -384,7 +482,7 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
                               ),
                               // 标签栏右侧操作按钮
                               Container(
-                                color: VSCodeColors.tabBackground,
+                                color: _colors.tabBackground,
                                 child: Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
@@ -419,7 +517,7 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
                       Container(
                         height: 28,
                         padding: const EdgeInsets.symmetric(horizontal: 12),
-                        color: VSCodeColors.sidebarBackground,
+                        color: _colors.sidebarBackground,
                         child: Row(
                           children: [
                             // 语言标签
@@ -472,7 +570,7 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
                       Expanded(
                         child: _tabs.isEmpty
                             ? Container(
-                                color: VSCodeColors.editorBackground,
+                                color: _colors.tabActiveBackground,
                                 child: Center(
                                   child: Column(
                                     mainAxisAlignment: MainAxisAlignment.center,
@@ -552,8 +650,8 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
             icon,
             size: 18,
             color: onPressed != null 
-                ? (iconColor ?? VSCodeColors.tabText) 
-                : VSCodeColors.tabText.withOpacity(0.3),
+                ? (iconColor ?? _colors.tabText) 
+                : _colors.tabText.withOpacity(0.3),
           ),
         ),
       ),
@@ -563,7 +661,7 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
   /// 构建 VS Code 风格的编辑器
   Widget _buildVSCodeEditor() {
     return Container(
-      color: VSCodeColors.editorBackground,
+      color: _colors.tabActiveBackground,
       child: SingleChildScrollView(
         controller: _scrollController,
         child: Row(
@@ -573,7 +671,7 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
             if (_editorSettings.showLineNumbers)
               Container(
                 width: _calculateLineNumberWidth(),
-                color: VSCodeColors.sidebarBackground,
+                color: _colors.sidebarBackground,
                 child: SingleChildScrollView(
                   controller: _lineNumberScrollController,
                   physics: const NeverScrollableScrollPhysics(),
@@ -590,11 +688,11 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
                           padding: const EdgeInsets.only(right: 12),
                           decoration: BoxDecoration(
                             color: isCurrentLine 
-                                ? VSCodeColors.currentLineHighlight.withOpacity(0.15)
+                                ? _colors.currentLineHighlight.withOpacity(0.15)
                                 : Colors.transparent,
                             border: Border(
                               right: BorderSide(
-                                color: VSCodeColors.lineNumberBorder,
+                                color: _colors.borderColor,
                                 width: 1,
                               ),
                             ),
@@ -606,8 +704,8 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
                               fontSize: _editorSettings.fontSize,
                               height: _editorSettings.lineHeight,
                               color: isCurrentLine 
-                                  ? VSCodeColors.currentLineNumber 
-                                  : VSCodeColors.lineNumberColor,
+                                  ? _colors.currentLineNumber 
+                                  : _colors.lineNumberColor,
                               fontWeight: isCurrentLine ? FontWeight.w500 : FontWeight.normal,
                             ),
                           ),
@@ -625,7 +723,7 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
                   Positioned.fill(
                     child: IgnorePointer(
                       child: Container(
-                        color: VSCodeColors.currentLineHighlight.withOpacity(0.1),
+                        color: _colors.currentLineHighlight.withOpacity(0.1),
                         margin: EdgeInsets.only(
                           top: (_currentHighlightedLine - 1) * _editorSettings.fontSize * _editorSettings.lineHeight,
                           left: 16,
@@ -676,7 +774,7 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
                         height: _editorSettings.lineHeight,
                         color: _syntaxHighlightingEnabled 
                             ? Colors.transparent 
-                            : VSCodeColors.tabText,
+                            : _colors.tabText,
                       ),
                       cursorColor: const Color(0xFFAEAFAD),
                       cursorWidth: 2,
@@ -718,7 +816,7 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
   Widget _buildStatusBar() {
     return Container(
       height: 24,
-      color: VSCodeColors.statusBarBackground,
+      color: _colors.statusBarBackground,
       padding: const EdgeInsets.symmetric(horizontal: 8),
       child: Row(
         children: [
@@ -726,7 +824,7 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
           _buildStatusBarItem(
             icon: Icons.account_tree,
             text: 'main',
-            color: VSCodeColors.statusBarText,
+            color: _colors.statusBarText,
           ),
           const SizedBox(width: 8),
           // 错误数量
@@ -748,13 +846,13 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
           // 右侧：位置信息
           _buildStatusBarItem(
             text: '行 $_currentHighlightedLine',
-            color: VSCodeColors.statusBarText,
+            color: _colors.statusBarText,
             tooltip: '当前行',
           ),
           const SizedBox(width: 8),
           _buildStatusBarItem(
             text: '列 ${_getCurrentColumn()}',
-            color: VSCodeColors.statusBarText,
+            color: _colors.statusBarText,
             tooltip: '当前列',
           ),
           const SizedBox(width: 8),
@@ -763,7 +861,7 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
             onTap: _showEncodingSelector,
             child: _buildStatusBarItem(
               text: _currentEncoding,
-              color: VSCodeColors.statusBarText,
+              color: _colors.statusBarText,
               tooltip: '文件编码 (点击更改)',
             ),
           ),
@@ -771,14 +869,14 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
           // 文件类型
           _buildStatusBarItem(
             text: _currentLanguage,
-            color: VSCodeColors.statusBarText,
+            color: _colors.statusBarText,
             tooltip: '语言模式',
           ),
           const SizedBox(width: 8),
           // 缩进方式
           _buildStatusBarItem(
             text: _editorSettings.useSpaces ? '空格: ${_editorSettings.tabSize}' : 'Tab Size: ${_editorSettings.tabSize}',
-            color: VSCodeColors.statusBarText,
+            color: _colors.statusBarText,
             tooltip: '缩进方式',
           ),
         ],
@@ -818,7 +916,7 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
   void _showEncodingSelector() {
     showModalBottomSheet(
       context: context,
-      backgroundColor: VSCodeColors.sidebarBackground,
+      backgroundColor: _colors.sidebarBackground,
       builder: (context) => Container(
         padding: const EdgeInsets.symmetric(vertical: 16),
         child: Column(
@@ -830,13 +928,13 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
               child: Text(
                 '选择文件编码',
                 style: TextStyle(
-                  color: VSCodeColors.tabText,
+                  color: _colors.tabText,
                   fontSize: 16,
                   fontWeight: FontWeight.bold,
                 ),
               ),
             ),
-            const Divider(color: VSCodeColors.borderColor),
+            const Divider(color: _colors.borderColor),
             ...EncodingTypes.commonEncodings.entries.map((entry) {
               final isSelected = entry.key == _currentEncoding;
               return ListTile(
@@ -847,7 +945,7 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
                 title: Text(
                   entry.key,
                   style: TextStyle(
-                    color: isSelected ? const Color(0xFF007ACC) : VSCodeColors.tabText,
+                    color: isSelected ? const Color(0xFF007ACC) : _colors.tabText,
                     fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
                   ),
                 ),

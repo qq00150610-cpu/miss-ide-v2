@@ -45,10 +45,8 @@ jobs:
         id: version
         run: |
           VERSION=$(grep "^version:" pubspec.yaml | sed 's/version: *//' | tr -d ' ')
-          MAJOR=$(echo "$VERSION" | cut -d'.' -f1)
-          MINOR=$(echo "$VERSION" | cut -d'.' -f2 | cut -d'+' -f1)
-          PATCH=$(echo "$VERSION" | cut -d'.' -f3 | cut -d'+' -f1)
-          TAG="v${MAJOR}.${MINOR}.${PATCH}"
+          TIMESTAMP=$(date +%Y%m%d%H%M)
+          TAG="v${VERSION}-${TIMESTAMP}"
           
           echo "当前版本: $VERSION"
           echo "Tag: $TAG"
@@ -76,11 +74,6 @@ jobs:
           fi
           echo "构建完成"
       
-      - name: List Build Outputs
-        run: |
-          echo "构建产物列表:"
-          ls -la build/app/outputs/flutter-apk/ || echo "APK 目录不存在"
-      
       - name: Rename APK
         if: always()
         run: |
@@ -88,9 +81,6 @@ jobs:
           if [ -f "app-${{ steps.build_type.outputs.type }}.apk" ]; then
             cp app-${{ steps.build_type.outputs.type }}.apk miss-ide-v2-${{ steps.version.outputs.new_version }}-${{ steps.build_type.outputs.type }}.apk
             ls -la *.apk
-          else
-            echo "APK 文件未找到，尝试列出所有文件:"
-            ls -la
           fi
       
       - name: Upload APK Artifact
@@ -100,6 +90,16 @@ jobs:
           name: miss-ide-v2-${{ steps.build_type.outputs.type }}-${{ steps.version.outputs.new_version }}
           path: build/app/outputs/flutter-apk/miss-ide-v2-${{ steps.version.outputs.new_version }}-${{ steps.build_type.outputs.type }}.apk
           retention-days: 30
+      
+      - name: Delete old releases
+        if: steps.build_type.outputs.type == 'release'
+        run: |
+          gh release list --limit 5 | while read line; do
+            tag=$(echo "$line" | awk '{print $1}')
+            gh release delete "$tag" --yes 2>/dev/null || true
+          done
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       
       - name: Create GitHub Release
         if: steps.build_type.outputs.type == 'release'
@@ -143,6 +143,4 @@ jobs:
           echo "=========================================="
           if [ "${{ steps.build_type.outputs.type }}" == "release" ]; then
             echo "Release: https://github.com/${{ github.repository }}/releases/tag/${{ steps.version.outputs.tag }}"
-          else
-            echo "APK 下载: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           fi

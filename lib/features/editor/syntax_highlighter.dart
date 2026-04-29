@@ -3,17 +3,26 @@ import 'package:flutter/material.dart';
 /// VS Code Dark+ 风格语法高亮工具类
 /// 不使用第三方包，自己实现基础语法高亮
 class SyntaxHighlighter {
-  // VS Code Dark+ 主题颜色
-  static const Color keywordColor = Color(0xFF569CD6);      // 蓝色 - 关键词
-  static const Color stringColor = Color(0xFFCE9178);        // 橙色 - 字符串
-  static const Color commentColor = Color(0xFF6A9955);        // 绿色 - 注释
-  static const Color numberColor = Color(0xFFB5CEA8);         // 浅绿色 - 数字
-  static const Color functionColor = Color(0xFFDCDCAA);      // 黄色 - 函数名
-  static const Color typeColor = Color(0xFF4EC9B0);           // 青色 - 类型
-  static const Color annotationColor = Color(0xFFD7BA7D);    // 金色 - 注解
-  static const Color operatorColor = Color(0xFFD4D4D4);       // 浅灰色 - 操作符
-  static const Color variableColor = Color(0xFF9CDCFE);       // 浅蓝色 - 变量
-  static const Color constantColor = Color(0xFF4FC1FF);       // 亮蓝色 - 常量
+  // 参考极影桌面IDE的语法高亮颜色（VS Code Dark+ 风格）
+  // 关键字：蓝色
+  static const Color keywordColor = Color(0xFF569CD6);
+  // 函数名：橙色
+  static const Color functionColor = Color(0xFFCE9178);
+  // 常量和类名：紫色
+  static const Color constantColor = Color(0xFFB5CEA8);
+  static const Color typeColor = Color(0xFF4EC9B0);
+  // 字符串：绿色
+  static const Color stringColor = Color(0xFF6A9955);
+  // 注释：灰色
+  static const Color commentColor = Color(0xFF6A9955);
+  // 数字：浅绿色
+  static const Color numberColor = Color(0xFFB5CEA8);
+  // 注解：金色
+  static const Color annotationColor = Color(0xFFD7BA7D);
+  // 操作符：白色
+  static const Color operatorColor = Color(0xFFD4D4D4);
+  // 变量：浅蓝色
+  static const Color variableColor = Color(0xFF9CDCFE);
   
   // Dart 关键词
   static const Set<String> dartKeywords = {

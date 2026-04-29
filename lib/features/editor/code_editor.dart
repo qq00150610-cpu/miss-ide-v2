@@ -204,7 +204,7 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
     // 监听文本变化以更新语法高亮
     _controller.addListener(_onTextChanged);
     
-    // 同步行号滚动
+    // 监听滚动以同步行号
     _scrollController.addListener(_syncLineNumberScroll);
   }
 
@@ -224,7 +224,8 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
   /// 同步行号和编辑器滚动
   void _syncLineNumberScroll() {
     if (_lineNumberScrollController.hasClients) {
-      _lineNumberScrollController.jumpTo(_scrollController.offset);
+      final offset = _scrollController.offset;
+      _lineNumberScrollController.jumpTo(offset);
     }
   }
 
@@ -247,9 +248,8 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
     super.dispose();
   }
   
-  /// 文本变化监听器
+  /// 文本变化监听器 - 触发状态更新以重新渲染高亮
   void _onTextChanged() {
-    _updateSyntaxHighlighting();
     _onContentChanged();
   }
   
@@ -658,144 +658,207 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
     );
   }
   
-  /// 构建 VS Code 风格的编辑器
+  /// 构建 VS Code 风格的编辑器 - 修复行号对齐问题
   Widget _buildVSCodeEditor() {
+    final lineHeight = _editorSettings.fontSize * _editorSettings.lineHeight;
+    final lineNumberWidth = _calculateLineNumberWidth();
+    
     return Container(
       color: _colors.tabActiveBackground,
-      child: SingleChildScrollView(
-        controller: _scrollController,
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // 行号面板 - VS Code 风格
-            if (_editorSettings.showLineNumbers)
-              Container(
-                width: _calculateLineNumberWidth(),
-                color: _colors.sidebarBackground,
-                child: SingleChildScrollView(
-                  controller: _lineNumberScrollController,
-                  physics: const NeverScrollableScrollPhysics(),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: List.generate(
-                      _getLineCount(),
-                      (index) {
-                        final lineNumber = index + 1;
-                        final isCurrentLine = lineNumber == _currentHighlightedLine;
-                        return Container(
-                          height: _editorSettings.fontSize * _editorSettings.lineHeight,
-                          alignment: Alignment.centerRight,
-                          padding: const EdgeInsets.only(right: 12),
-                          decoration: BoxDecoration(
-                            color: isCurrentLine 
-                                ? _colors.currentLineHighlight.withOpacity(0.15)
-                                : Colors.transparent,
-                            border: Border(
-                              right: BorderSide(
-                                color: _colors.borderColor,
-                                width: 1,
-                              ),
-                            ),
-                          ),
-                          child: Text(
-                            '$lineNumber',
-                            style: TextStyle(
-                              fontFamily: 'monospace',
-                              fontSize: _editorSettings.fontSize,
-                              height: _editorSettings.lineHeight,
-                              color: isCurrentLine 
-                                  ? _colors.currentLineNumber 
-                                  : _colors.lineNumberColor,
-                              fontWeight: isCurrentLine ? FontWeight.w500 : FontWeight.normal,
-                            ),
-                          ),
-                        );
-                      },
-                    ),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          return Stack(
+            children: [
+              // 行号区域 - 固定在左侧
+              if (_editorSettings.showLineNumbers)
+                Positioned(
+                  left: 0,
+                  top: 0,
+                  bottom: 0,
+                  width: lineNumberWidth,
+                  child: Container(
+                    color: _colors.sidebarBackground,
+                    child: _buildLineNumbers(lineHeight, lineNumberWidth),
                   ),
                 ),
+              // 代码编辑区
+              Positioned(
+                left: lineNumberWidth,
+                top: 0,
+                right: 0,
+                bottom: 0,
+                child: _buildCodeArea(lineHeight),
               ),
-            // 代码编辑区
-            Expanded(
-              child: Stack(
-                children: [
-                  // 当前行高亮背景
-                  Positioned.fill(
-                    child: IgnorePointer(
-                      child: Container(
-                        color: _colors.currentLineHighlight.withOpacity(0.1),
-                        margin: EdgeInsets.only(
-                          top: (_currentHighlightedLine - 1) * _editorSettings.fontSize * _editorSettings.lineHeight,
-                          left: 16,
-                          right: 16,
-                        ),
-                        constraints: BoxConstraints(
-                          minHeight: _editorSettings.fontSize * _editorSettings.lineHeight,
-                        ),
-                      ),
-                    ),
-                  ),
-                  // 高亮文本层（只读，用于显示）
-                  if (_syntaxHighlightingEnabled && _highlightedSpans.isNotEmpty)
-                    Positioned.fill(
-                      child: IgnorePointer(
-                        child: SingleChildScrollView(
-                          physics: const NeverScrollableScrollPhysics(),
-                          child: Padding(
-                            padding: const EdgeInsets.all(16),
-                            child: RichText(
-                              text: TextSpan(
-                                children: _highlightedSpans,
-                                style: TextStyle(
-                                  fontFamily: 'monospace',
-                                  fontSize: _editorSettings.fontSize,
-                                  height: _editorSettings.lineHeight,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  // 透明输入层
-                  Positioned.fill(
-                    child: TextField(
-                      controller: _controller,
-                      focusNode: _editorFocusNode,
-                      autofocus: true,
-                      maxLines: null,
-                      expands: false,
-                      keyboardType: TextInputType.multiline,
-                      textInputAction: TextInputAction.newline,
-                      scrollPhysics: const NeverScrollableScrollPhysics(),
-                      style: TextStyle(
-                        fontFamily: 'monospace',
-                        fontSize: _editorSettings.fontSize,
-                        height: _editorSettings.lineHeight,
-                        color: _syntaxHighlightingEnabled 
-                            ? Colors.transparent 
-                            : _colors.tabText,
-                      ),
-                      cursorColor: const Color(0xFFAEAFAD),
-                      cursorWidth: 2,
-                      decoration: InputDecoration(
-                        border: InputBorder.none,
-                        contentPadding: const EdgeInsets.all(16),
-                        fillColor: Colors.transparent,
-                        filled: true,
-                      ),
-                      onChanged: (value) {
-                        // 更新当前行
-                        _updateCurrentLine();
-                      },
-                    ),
-                  ),
-                ],
+            ],
+          );
+        },
+      ),
+    );
+  }
+  
+  /// 构建行号区域
+  Widget _buildLineNumbers(double lineHeight, double lineNumberWidth) {
+    return ListView.builder(
+      controller: _lineNumberScrollController,
+      physics: const NeverScrollableScrollPhysics(),
+      padding: EdgeInsets.zero,
+      itemCount: _getLineCount() + 100, // 预加载更多行
+      itemBuilder: (context, index) {
+        if (index >= _getLineCount()) {
+          // 预渲染空白行
+          return SizedBox(
+            height: lineHeight,
+            width: lineNumberWidth,
+          );
+        }
+        
+        final lineNumber = index + 1;
+        final isCurrentLine = lineNumber == _currentHighlightedLine;
+        
+        return Container(
+          height: lineHeight,
+          width: lineNumberWidth,
+          alignment: Alignment.centerRight,
+          padding: const EdgeInsets.only(right: 8),
+          decoration: BoxDecoration(
+            color: isCurrentLine 
+                ? _colors.currentLineHighlight.withOpacity(0.15)
+                : Colors.transparent,
+            border: Border(
+              right: BorderSide(
+                color: _colors.borderColor,
+                width: 1,
               ),
             ),
-          ],
+          ),
+          child: Text(
+            '$lineNumber',
+            style: TextStyle(
+              fontFamily: 'monospace',
+              fontSize: _editorSettings.fontSize,
+              height: _editorSettings.lineHeight,
+              color: isCurrentLine 
+                  ? _colors.currentLineNumber 
+                  : _colors.lineNumberColor,
+              fontWeight: isCurrentLine ? FontWeight.w500 : FontWeight.normal,
+            ),
+          ),
+        );
+      },
+    );
+  }
+  
+  /// 构建代码编辑区域
+  Widget _buildCodeArea(double lineHeight) {
+    return NotificationListener<ScrollNotification>(
+      onNotification: (notification) {
+        // 同步行号滚动
+        if (notification is ScrollUpdateNotification) {
+          if (_lineNumberScrollController.hasClients) {
+            _lineNumberScrollController.jumpTo(notification.metrics.pixels);
+          }
+        }
+        return false;
+      },
+      child: SingleChildScrollView(
+        controller: _scrollController,
+        physics: const ClampingScrollPhysics(),
+        padding: EdgeInsets.only(
+          top: 0,
+          left: 12,
+          right: 12,
+        ),
+        child: SizedBox(
+          width: double.infinity,
+          child: _buildHighlightedText(lineHeight),
         ),
       ),
+    );
+  }
+  
+  /// 构建带语法高亮的文本显示
+  Widget _buildHighlightedText(double lineHeight) {
+    final code = _controller.text;
+    
+    // 如果没有内容或语法高亮未启用，返回普通文本
+    if (code.isEmpty || !_syntaxHighlightingEnabled) {
+      return Text(
+        code.isEmpty ? ' ' : code,
+        style: TextStyle(
+          fontFamily: 'monospace',
+          fontSize: _editorSettings.fontSize,
+          height: _editorSettings.lineHeight,
+          color: _syntaxHighlightingEnabled ? Colors.transparent : _colors.tabText,
+        ),
+      );
+    }
+    
+    // 生成语法高亮文本
+    final spans = SyntaxHighlighter.highlight(
+      code,
+      _currentLanguage,
+      defaultColor: Colors.transparent, // 让 TextField 接收输入
+      fontSize: _editorSettings.fontSize,
+    );
+    
+    // 如果高亮结果只有一段且是空文本，显示空格保持高度
+    if (spans.length == 1 && (spans.first.text?.isEmpty ?? true)) {
+      return Text(
+        ' ',
+        style: TextStyle(
+          fontFamily: 'monospace',
+          fontSize: _editorSettings.fontSize,
+          height: _editorSettings.lineHeight,
+        ),
+      );
+    }
+    
+    return Stack(
+      children: [
+        // 高亮文本层（只读显示）
+        IgnorePointer(
+          child: RichText(
+            text: TextSpan(
+              children: spans,
+              style: TextStyle(
+                fontFamily: 'monospace',
+                fontSize: _editorSettings.fontSize,
+                height: _editorSettings.lineHeight,
+              ),
+            ),
+          ),
+        ),
+        // 透明输入层
+        TextField(
+          controller: _controller,
+          focusNode: _editorFocusNode,
+          autofocus: true,
+          maxLines: null,
+          expands: false,
+          keyboardType: TextInputType.multiline,
+          textInputAction: TextInputAction.newline,
+          scrollPhysics: const NeverScrollableScrollPhysics(),
+          style: TextStyle(
+            fontFamily: 'monospace',
+            fontSize: _editorSettings.fontSize,
+            height: _editorSettings.lineHeight,
+            color: Colors.transparent, // 透明，让高亮层显示
+          ),
+          cursorColor: const Color(0xFFAEAFAD),
+          cursorWidth: 2,
+          decoration: InputDecoration(
+            border: InputBorder.none,
+            contentPadding: EdgeInsets.zero,
+            fillColor: Colors.transparent,
+            filled: true,
+            isDense: true,
+          ),
+          onChanged: (value) {
+            _updateCurrentLine();
+            _onContentChanged();
+          },
+        ),
+      ],
     );
   }
   
@@ -1025,14 +1088,18 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
   }
 
   /// 计算行号面板宽度，基于最大行号位数动态调整
+  /// 使用 monospace 字体精确计算
   double _calculateLineNumberWidth() {
     final lineCount = _getLineCount();
     // 计算行号的位数
     final digits = lineCount.toString().length;
-    // 每个数字大约8px宽度，加上8px的padding
-    final width = (digits * 10.0) + 16;
-    // 限制在50-80之间
-    return width.clamp(50.0, 80.0);
+    // monospace 字体中每个数字的宽度约为 fontSize * 0.6
+    // 对于 14px 字体，数字宽度约为 8.4px
+    // 加上 8px 的右侧 padding
+    final digitWidth = _editorSettings.fontSize * 0.6;
+    final width = (digits * digitWidth) + 12;
+    // 限制在 40-80 之间，最小 40px 足够显示 4 位数字
+    return width.clamp(40.0, 80.0);
   }
 
   int _getCurrentLine() {

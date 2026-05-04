@@ -876,6 +876,14 @@ $code
       {'role': 'user', 'content': userMessage},
     ];
 
+    final requestBody = jsonEncode({
+      'model': config.modelId,
+      'messages': messages,
+      'temperature': 0.7,
+      'max_tokens': 4096,
+    });
+    final bodyBytes = utf8.encode(requestBody);
+
     // 创建接受自签名证书的 HttpClient
     final httpClient = HttpClient()
       ..badCertificateCallback = (cert, host, port) => true;
@@ -885,20 +893,18 @@ $code
       final httpRequest = await httpClient.postUrl(uri);
       
       httpRequest.headers.set('Content-Type', 'application/json; charset=utf-8');
+      httpRequest.headers.set('Content-Length', bodyBytes.length.toString());
       httpRequest.headers.set('Authorization', 'Bearer $_apiKey');
       httpRequest.headers.set('x-openclaw-model', _openclawSubModel);
       
-      httpRequest.write(utf8.encode(jsonEncode({
-        'model': config.modelId,
-        'messages': messages,
-        'temperature': 0.7,
-        'max_tokens': 4096,
-      })));
+      httpRequest.add(bodyBytes);
 
       final httpResponse = await httpRequest.close();
       final responseBody = await httpResponse.transform(utf8.decoder).join();
 
       debugPrint('OpenClaw response status: ${httpResponse.statusCode}');
+      debugPrint('OpenClaw request body: $requestBody');
+      debugPrint('OpenClaw sub model: $_openclawSubModel');
 
       if (httpResponse.statusCode == 200) {
         final data = jsonDecode(responseBody);
@@ -906,6 +912,9 @@ $code
       } else {
         return 'OpenClaw API错误 (${httpResponse.statusCode}): $responseBody';
       }
+    } catch (e) {
+      debugPrint('OpenClaw error: $e');
+      return 'OpenClaw 连接错误: $e';
     } finally {
       httpClient.close();
     }

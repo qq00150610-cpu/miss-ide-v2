@@ -67,7 +67,7 @@ class AIService {
   String _selectedModel = 'DeepSeek';
   String _apiKey = '';
   bool _isInitialized = false;
-  String _openclawSubModel = 'modelstudio/qwen3-coder-plus';
+  String _openclawSubModel = 'zhipu/glm-4-plus';
   
   // AI回调函数
   Function(String)? onProjectCreated;
@@ -232,7 +232,7 @@ main();
       final prefs = await SharedPreferences.getInstance();
       _selectedModel = prefs.getString('ai_selected_model') ?? 'DeepSeek';
       _apiKey = prefs.getString('ai_api_key_$_selectedModel') ?? '';
-      _openclawSubModel = prefs.getString('openclaw_sub_model') ?? 'modelstudio/qwen3-coder-plus';
+      _openclawSubModel = prefs.getString('openclaw_sub_model') ?? 'zhipu/glm-4-plus';
       // 如果选择的是 OpenClaw 且没有 API Key，使用默认 key
       if (_selectedModel == 'OpenClaw' && _apiKey.isEmpty) {
         _apiKey = '623fe37dd689d5f880757c57d949a6b17aeadb3e8ef89929';

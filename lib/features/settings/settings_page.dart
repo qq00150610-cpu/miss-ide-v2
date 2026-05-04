@@ -466,22 +466,22 @@ class _SettingsPageState extends State<SettingsPage> {
 
   String _getOpenClawSubModelName(String modelId) {
     const subModels = {
-      'modelstudio/qwen3-coder-plus': 'qwen3-coder-plus (代码专精，推荐)',
-      'modelstudio/qwen3.5-plus': 'qwen3.5-plus (通用，百万上下文)',
-      'modelstudio/MiniMax-M2.5': 'MiniMax-M2.5 (推理增强)',
-      'modelstudio/kimi-k2.5': 'kimi-k2.5 (多模态)',
-      'modelstudio/glm-5': 'glm-5 (智谱)',
+      'zhipu/glm-4-plus': 'glm-4-plus (推荐，智谱最强)',
+      'zhipu/glm-4-flash': 'glm-4-flash (智谱免费)',
+      'modelstudio/qwen3.5-plus': 'qwen3.5-plus (百炼，需充值)',
+      'modelstudio/qwen3-coder-plus': 'qwen3-coder-plus (百炼，需充值)',
+      'modelstudio/MiniMax-M2.5': 'MiniMax-M2.5 (百炼，需充值)',
     };
     return subModels[modelId] ?? modelId;
   }
 
   void _showOpenClawModelSelector() {
     final subModels = [
-      {'id': 'modelstudio/qwen3-coder-plus', 'name': 'qwen3-coder-plus', 'desc': '代码专精，推荐'},
-      {'id': 'modelstudio/qwen3.5-plus', 'name': 'qwen3.5-plus', 'desc': '通用，百万上下文'},
-      {'id': 'modelstudio/MiniMax-M2.5', 'name': 'MiniMax-M2.5', 'desc': '推理增强'},
-      {'id': 'modelstudio/kimi-k2.5', 'name': 'kimi-k2.5', 'desc': '多模态'},
-      {'id': 'modelstudio/glm-5', 'name': 'glm-5', 'desc': '智谱'},
+      {'id': 'zhipu/glm-4-plus', 'name': 'glm-4-plus', 'desc': '推荐，智谱最强'},
+      {'id': 'zhipu/glm-4-flash', 'name': 'glm-4-flash', 'desc': '智谱免费'},
+      {'id': 'modelstudio/qwen3.5-plus', 'name': 'qwen3.5-plus', 'desc': '百炼，需充值'},
+      {'id': 'modelstudio/qwen3-coder-plus', 'name': 'qwen3-coder-plus', 'desc': '百炼，需充值'},
+      {'id': 'modelstudio/MiniMax-M2.5', 'name': 'MiniMax-M2.5', 'desc': '百炼，需充值'},
     ];
 
     showModalBottomSheet(

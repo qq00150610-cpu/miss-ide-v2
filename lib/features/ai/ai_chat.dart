@@ -1,7 +1,9 @@
 import 'dart:io';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'ai_service.dart';
@@ -56,6 +58,12 @@ class _AIChatPageState extends State<AIChatPage> {
   // API Key 验证状态
   bool _isApiKeyValid = false;
   bool _isValidating = false;
+  
+  // 图片选择相关
+  final ImagePicker _imagePicker = ImagePicker();
+  String? _selectedImageBase64; // 选中的图片 base64
+  String? _selectedImagePath; // 选中的图片路径
+  String _selectedImageMimeType = 'image/jpeg'; // 图片 MIME 类型
 
   @override
   void initState() {
@@ -96,6 +104,142 @@ class _AIChatPageState extends State<AIChatPage> {
       _pendingCode = code;
       _pendingLanguage = language;
     });
+  }
+  
+  /// 选择图片
+  Future<void> _pickImage() async {
+    try {
+      final XFile? image = await _imagePicker.pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 1920,
+        maxHeight: 1920,
+        imageQuality: 85,
+      );
+      
+      if (image != null) {
+        final bytes = await image.readAsBytes();
+        final base64Image = base64Encode(bytes);
+        
+        // 根据文件扩展名确定 MIME 类型
+        String mimeType = 'image/jpeg';
+        final ext = image.path.toLowerCase();
+        if (ext.endsWith('.png')) {
+          mimeType = 'image/png';
+        } else if (ext.endsWith('.gif')) {
+          mimeType = 'image/gif';
+        } else if (ext.endsWith('.webp')) {
+          mimeType = 'image/webp';
+        }
+        
+        setState(() {
+          _selectedImageBase64 = base64Image;
+          _selectedImagePath = image.path;
+          _selectedImageMimeType = mimeType;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('选择图片失败: $e')),
+        );
+      }
+    }
+  }
+  
+  /// 清除选中的图片
+  void _clearSelectedImage() {
+    setState(() {
+      _selectedImageBase64 = null;
+      _selectedImagePath = null;
+      _selectedImageMimeType = 'image/jpeg';
+    });
+  }
+  
+  /// 显示图片预览
+  void _showImagePreview() {
+    if (_selectedImageBase64 == null) return;
+    
+    showDialog(
+      context: context,
+      builder: (context) => Dialog(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // 标题栏
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              decoration: BoxDecoration(
+                color: Colors.blue.shade50,
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.image, color: Colors.blue),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      _selectedImagePath != null 
+                          ? p.basename(_selectedImagePath!)
+                          : '图片预览',
+                      style: const TextStyle(fontWeight: FontWeight.w500),
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                ],
+              ),
+            ),
+            // 图片
+            Flexible(
+              child: InteractiveViewer(
+                minScale: 0.5,
+                maxScale: 4.0,
+                child: Image.memory(
+                  base64Decode(_selectedImageBase64!),
+                  fit: BoxFit.contain,
+                  errorBuilder: (context, error, stackTrace) {
+                    return const Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.broken_image, size: 64, color: Colors.grey),
+                          SizedBox(height: 8),
+                          Text('无法加载图片'),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ),
+            // 底部按钮
+            Container(
+              padding: const EdgeInsets.all(8),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  TextButton.icon(
+                    icon: const Icon(Icons.delete_outline, color: Colors.red),
+                    label: const Text('移除图片', style: TextStyle(color: Colors.red)),
+                    onPressed: () {
+                      _clearSelectedImage();
+                      Navigator.pop(context);
+                    },
+                  ),
+                  TextButton.icon(
+                    icon: const Icon(Icons.close),
+                    label: const Text('关闭'),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
@@ -605,6 +749,65 @@ class _AIChatPageState extends State<AIChatPage> {
                       ],
                     ),
                   ),
+                // 选中图片预览
+                if (_selectedImageBase64 != null)
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 8, left: 16, right: 16),
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.blue.shade50,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.blue.shade200),
+                    ),
+                    child: Row(
+                      children: [
+                        // 图片缩略图
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(4),
+                          child: Image.memory(
+                            base64Decode(_selectedImageBase64!),
+                            width: 60,
+                            height: 60,
+                            fit: BoxFit.cover,
+                            errorBuilder: (context, error, stackTrace) {
+                              return Container(
+                                width: 60,
+                                height: 60,
+                                color: Colors.grey.shade200,
+                                child: const Icon(Icons.broken_image),
+                              );
+                            },
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                _selectedImagePath != null 
+                                    ? p.basename(_selectedImagePath!)
+                                    : '已选择图片',
+                                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              Text(
+                                '点击图片可预览',
+                                style: TextStyle(fontSize: 10, color: Colors.grey.shade600),
+                              ),
+                            ],
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.close, size: 20),
+                          onPressed: _clearSelectedImage,
+                          tooltip: '移除图片',
+                        ),
+                      ],
+                    ),
+                  ),
                 Row(
                   children: [
                     // 选择上下文文件按钮（替代粘贴按钮）
@@ -652,10 +855,30 @@ class _AIChatPageState extends State<AIChatPage> {
                                     ),
                                   )
                                 : null,
-                            suffixIcon: IconButton(
-                              icon: const Icon(Icons.paste),
-                              onPressed: _pasteFromClipboard,
-                              tooltip: '粘贴代码',
+                            suffixIcon: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                if (_selectedImageBase64 != null)
+                                  Container(
+                                    margin: const EdgeInsets.symmetric(horizontal: 4),
+                                    child: IconButton(
+                                      icon: const Icon(Icons.image, color: Colors.blue),
+                                      onPressed: () => _showImagePreview(),
+                                      tooltip: '查看选中的图片',
+                                    ),
+                                  )
+                                else
+                                  IconButton(
+                                    icon: const Icon(Icons.image_outlined),
+                                    onPressed: _pickImage,
+                                    tooltip: '添加图片',
+                                  ),
+                                IconButton(
+                                  icon: const Icon(Icons.paste),
+                                  onPressed: _pasteFromClipboard,
+                                  tooltip: '粘贴代码',
+                                ),
+                              ],
                             ),
                           ),
                           maxLines: 1,
@@ -1244,16 +1467,32 @@ $code
       setState(() => _pastedCode = null);
     }
     
-    if (text.isEmpty || _isLoading) return;
-
-    // 添加用户消息
-    _addMessage(ChatMessage(
-      text: text,
-      isUser: true,
-      time: _getCurrentTime(),
-    ));
+    if (text.isEmpty && _selectedImageBase64 == null) return;
+    
+    // 检查是否有图片
+    final hasImage = _selectedImageBase64 != null;
+    final imageBase64 = _selectedImageBase64;
+    final imageMimeType = _selectedImageMimeType;
+    
+    // 添加用户消息（如果有图片则显示图片）
+    if (hasImage) {
+      _addMessage(ChatMessage(
+        text: text.isNotEmpty ? text : '[发送了一张图片]',
+        isUser: true,
+        time: _getCurrentTime(),
+        imageBase64: imageBase64,
+      ));
+    } else {
+      _addMessage(ChatMessage(
+        text: text,
+        isUser: true,
+        time: _getCurrentTime(),
+      ));
+    }
 
     _messageController.clear();
+    // 清空选中的图片
+    _clearSelectedImage();
     setState(() => _isLoading = true);
 
     try {
@@ -1263,7 +1502,7 @@ $code
       if (command != null) {
         await _handleCommand(command);
       } else {
-        await _handleNormalMessage(text);
+        await _handleNormalMessage(text, hasImage: hasImage, imageBase64: imageBase64, imageMimeType: imageMimeType);
       }
     } catch (e) {
       if (mounted) {
@@ -1416,7 +1655,12 @@ $context
   }
 
   /// 处理普通消息
-  Future<void> _handleNormalMessage(String text) async {
+  Future<void> _handleNormalMessage(
+    String text, {
+    bool hasImage = false,
+    String? imageBase64,
+    String imageMimeType = 'image/jpeg',
+  }) async {
     // 识别意图
     final intent = aiService.recognizeIntent(text);
     String response;
@@ -1469,6 +1713,16 @@ $context
         break;
         
       default:
+        // 如果有图片，优先使用图片识别
+        if (hasImage && imageBase64 != null) {
+          response = await aiService.chatWithImage(
+            text.isNotEmpty ? text : '请描述这张图片的内容',
+            imageBase64,
+            mimeType: imageMimeType,
+          );
+          break;
+        }
+        
         // 在prompt中添加文件上下文
         String enhancedPrompt = text;
         
@@ -1852,6 +2106,34 @@ $contextFilesContent
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // 如果有图片，显示图片
+            if (message.imageBase64 != null)
+              GestureDetector(
+                onTap: () => _showFullScreenImage(message.imageBase64!),
+                child: Container(
+                  margin: const EdgeInsets.only(bottom: 8),
+                  constraints: const BoxConstraints(
+                    maxHeight: 200,
+                    maxWidth: 300,
+                  ),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: Image.memory(
+                      base64Decode(message.imageBase64!),
+                      fit: BoxFit.cover,
+                      errorBuilder: (context, error, stackTrace) {
+                        return Container(
+                          height: 100,
+                          color: Colors.grey.shade200,
+                          child: const Center(
+                            child: Icon(Icons.broken_image),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ),
+              ),
             // 检测并高亮代码块
             _buildMessageContent(message.text),
             const SizedBox(height: 4),
@@ -1893,6 +2175,36 @@ $contextFilesContent
               ],
             ),
           ],
+        ),
+      ),
+    );
+  }
+  
+  /// 显示全屏图片
+  void _showFullScreenImage(String base64Image) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => Scaffold(
+          backgroundColor: Colors.black,
+          appBar: AppBar(
+            backgroundColor: Colors.black,
+            iconTheme: const IconThemeData(color: Colors.white),
+          ),
+          body: Center(
+            child: InteractiveViewer(
+              minScale: 0.5,
+              maxScale: 4.0,
+              child: Image.memory(
+                base64Decode(base64Image),
+                fit: BoxFit.contain,
+                errorBuilder: (context, error, stackTrace) {
+                  return const Center(
+                    child: Icon(Icons.broken_image, size: 64, color: Colors.white),
+                  );
+                },
+              ),
+            ),
+          ),
         ),
       ),
     );
@@ -2304,11 +2616,13 @@ class ChatMessage {
   final String text;
   final bool isUser;
   final String time;
+  final String? imageBase64; // 可选的图片 base64
 
   ChatMessage({
     required this.text,
     required this.isUser,
     required this.time,
+    this.imageBase64,
   });
 }
 

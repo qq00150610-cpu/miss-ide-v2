@@ -5,13 +5,70 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:path/path.dart' as p;
 
+/// AI消息内容项（支持多模态）
+class AIMessageContent {
+  final String type; // 'text' 或 'image_url'
+  final String? text;
+  final String? imageUrl;
+  
+  AIMessageContent({
+    required this.type,
+    this.text,
+    this.imageUrl,
+  });
+  
+  Map<String, dynamic> toJson() {
+    if (type == 'text') {
+      return {'type': type, 'text': text ?? ''};
+    } else if (type == 'image_url') {
+      return {'type': type, 'image_url': {'url': imageUrl ?? ''}};
+    }
+    return {'type': type};
+  }
+}
+
 /// AI消息
 class AIMessage {
   final String role;
   final String content;
-  AIMessage({required this.role, required this.content});
+  final List<AIMessageContent>? multiModalContent; // 多模态内容列表
   
-  Map<String, dynamic> toJson() => {'role': role, 'content': content};
+  AIMessage({
+    required this.role, 
+    required this.content,
+    this.multiModalContent,
+  });
+  
+  /// 转换为JSON（支持多模态）
+  Map<String, dynamic> toJson() {
+    if (multiModalContent != null && multiModalContent!.isNotEmpty) {
+      return {
+        'role': role, 
+        'content': multiModalContent!.map((c) => c.toJson()).toList()
+      };
+    }
+    return {'role': role, 'content': content};
+  }
+  
+  /// 创建纯文本消息
+  factory AIMessage.text(String role, String content) {
+    return AIMessage(role: role, content: content);
+  }
+  
+  /// 创建带图片的多模态消息
+  factory AIMessage.withImage(String role, String text, String base64Image, {String mimeType = 'image/jpeg'}) {
+    return AIMessage(
+      role: role,
+      content: text,
+      multiModalContent: [
+        AIMessageContent(type: 'text', text: text),
+        AIMessageContent(
+          type: 'image_url',
+          imageUrl: 'data:$mimeType;base64,$base64Image',
+        ),
+      ],
+    );
+  }
 }
 
 /// AI模型配置
@@ -392,20 +449,33 @@ main();
       return '请先配置AI API Key';
     }
     
+    // 从 projectPath 中提取项目名
+    final projectName = p.basename(projectPath);
+    
     try {
       // 向AI询问项目结构
       final prompt = '''请为以下项目生成代码结构：
       
+项目名称: $projectName
 描述: $description
 
 请生成一个完整的项目结构，包括所有必要的文件。
-回复格式要求：
-1. 首先说明项目类型和建议的文件结构
-2. 然后列出每个文件的完整内容
-3. 使用以下标记格式：
+【重要格式要求 - 必须严格遵守】：
+1. 使用以下标记格式来分隔每个文件：
 
 【文件: 文件路径】
 文件内容...
+【文件结束】
+
+2. 文件路径只需要写相对于项目根目录的路径即可，**不要**在路径前加项目名（如不要写成 "$projectName/lib/main.dart"，而应该写成 "lib/main.dart"）
+3. 文件内容要完整可用
+4. 不要添加任何额外的解释文字在文件标记之外
+
+示例：
+【文件: lib/main.dart】
+void main() {
+  print('Hello');
+}
 【文件结束】
 
 请确保代码可以直接使用。''';
@@ -417,8 +487,38 @@ main();
       final matches = filePattern.allMatches(response);
       
       if (matches.isEmpty) {
-        // 没有找到文件格式，返回原始响应
-        return response;
+        // 没有找到文件格式，尝试 Markdown 代码块格式作为 fallback
+        final codeBlockPattern = RegExp(r'```[\w]*\s*([^\s]+)\n([\s\S]*?)```', multiLine: true);
+        final codeMatches = codeBlockPattern.allMatches(response);
+        
+        if (codeMatches.isEmpty) {
+          // 仍然没有找到，返回原始响应
+          return response;
+        }
+        
+        // 使用代码块格式创建文件
+        final dir = Directory(projectPath);
+        await dir.create(recursive: true);
+        
+        for (final match in codeMatches) {
+          var filePath = match.group(1)?.trim() ?? '';
+          final content = match.group(2)?.trim() ?? '';
+          
+          if (filePath.isNotEmpty && content.isNotEmpty) {
+            // 去掉可能的项目名前缀
+            if (filePath.startsWith('$projectName/')) {
+              filePath = filePath.substring(projectName.length + 1);
+            }
+            
+            final fullPath = p.join(projectPath, filePath);
+            final file = File(fullPath);
+            await file.parent.create(recursive: true);
+            await file.writeAsString(content);
+          }
+        }
+        
+        onProjectCreated?.call(projectPath);
+        return '项目已创建: $projectPath\n\n共生成 ${codeMatches.length} 个文件';
       }
       
       // 创建项目目录
@@ -427,10 +527,15 @@ main();
       
       // 创建每个文件
       for (final match in matches) {
-        final filePath = match.group(1)?.trim() ?? '';
+        var filePath = match.group(1)?.trim() ?? '';
         final content = match.group(2)?.trim() ?? '';
         
         if (filePath.isNotEmpty && content.isNotEmpty) {
+          // 去掉可能的项目名前缀
+          if (filePath.startsWith('$projectName/')) {
+            filePath = filePath.substring(projectName.length + 1);
+          }
+          
           final fullPath = p.join(projectPath, filePath);
           final file = File(fullPath);
           await file.parent.create(recursive: true);
@@ -452,6 +557,9 @@ main();
   Future<List<String>> parseAndCreateFiles(String response, String basePath) async {
     final createdFiles = <String>[];
     
+    // 从 basePath 中提取项目名
+    final projectName = p.basename(basePath);
+    
     // 匹配【文件: 路径】...【文件结束】格式
     final pattern1 = RegExp(r'【文件:\s*(.+?)】(.*?)【文件结束】', dotAll: true);
     final matches1 = pattern1.allMatches(response);
@@ -462,8 +570,13 @@ main();
     
     // 处理【文件: 路径】格式
     for (final match in matches1) {
-      final filePath = match.group(1)?.trim() ?? '';
+      var filePath = match.group(1)?.trim() ?? '';
       final content = match.group(2)?.trim() ?? '';
+      
+      // 去掉可能的项目名前缀
+      if (filePath.startsWith('$projectName/')) {
+        filePath = filePath.substring(projectName.length + 1);
+      }
       
       if (filePath.isNotEmpty && content.isNotEmpty) {
         final success = await _createFile(basePath, filePath, content);
@@ -475,11 +588,16 @@ main();
     
     // 处理 ```路径\n代码``` 格式
     for (final match in matches2) {
-      final filePath = match.group(1)?.trim() ?? '';
+      var filePath = match.group(1)?.trim() ?? '';
       final content = match.group(2)?.trim() ?? '';
       
       // 跳过文件名注释等非文件路径
       if (filePath.contains('.') && !filePath.contains('：') && content.isNotEmpty) {
+        // 去掉可能的项目名前缀
+        if (filePath.startsWith('$projectName/')) {
+          filePath = filePath.substring(projectName.length + 1);
+        }
+        
         final success = await _createFile(basePath, filePath, content);
         if (success) {
           createdFiles.add(p.join(basePath, filePath));
@@ -613,6 +731,219 @@ $code
     } catch (e) {
       debugPrint('Chat error: $e');
       return '请求失败: $e\n\n请检查API Key是否正确';
+    }
+  }
+  
+  /// 发送带图片的消息并获取AI响应
+  /// 目前支持 OpenClaw 和 OpenAI 兼容的 API
+  Future<String> chatWithImage(
+    String userMessage,
+    String imageBase64, {
+    String mimeType = 'image/jpeg',
+    List<AIMessage>? history,
+  }) async {
+    final config = _models[_selectedModel];
+    if (config == null) {
+      return '错误：未知的模型配置';
+    }
+
+    if (_apiKey.isEmpty && config.provider != 'ollama') {
+      return '请先在设置中配置 ${config.name} 的 API Key。\n\n获取地址：${_getKeyUrl(config.name)}';
+    }
+
+    try {
+      debugPrint('Sending multimodal request to ${config.name}...');
+      String response;
+      
+      switch (config.provider) {
+        case 'openclaw':
+          // OpenClaw 支持多模态
+          response = await _chatOpenClaw(
+            config, 
+            userMessage, 
+            history,
+            imageBase64: imageBase64,
+            mimeType: mimeType,
+          );
+          break;
+        case 'openai':
+          // OpenAI API 支持多模态
+          response = await _chatOpenAIWithImage(
+            config,
+            userMessage,
+            history,
+            imageBase64: imageBase64,
+            mimeType: mimeType,
+          );
+          break;
+        case 'deepseek':
+          // DeepSeek 可能支持多模态
+          response = await _chatDeepSeekWithImage(
+            config,
+            userMessage,
+            history,
+            imageBase64: imageBase64,
+            mimeType: mimeType,
+          );
+          break;
+        case 'ollama':
+          // Ollama 部分模型支持多模态
+          response = await _chatOllamaWithImage(
+            config,
+            userMessage,
+            history,
+            imageBase64: imageBase64,
+            mimeType: mimeType,
+          );
+          break;
+        default:
+          // 其他模型暂不支持图片
+          return '当前选中的 ${config.name} 模型不支持图片识别。请选择 OpenClaw、OpenAI、DeepSeek 或 Ollama 模型。';
+      }
+      
+      debugPrint('Response received');
+      return response;
+    } catch (e) {
+      debugPrint('Chat with image error: $e');
+      return '请求失败: $e\n\n请检查API Key是否正确';
+    }
+  }
+  
+  /// OpenAI API 支持多模态
+  Future<String> _chatOpenAIWithImage(
+    AIModelConfig config,
+    String userMessage,
+    List<AIMessage>? history, {
+    String? imageBase64,
+    String mimeType = 'image/jpeg',
+  }) async {
+    final messages = <Map<String, dynamic>>[
+      {'role': 'system', 'content': '你是一个专业的编程助手，帮助用户解决代码问题。请用中文回答。'},
+      if (history != null) ...history.map((m) => m.toJson()),
+    ];
+    
+    // 添加用户消息（支持多模态）
+    if (imageBase64 != null && imageBase64.isNotEmpty) {
+      messages.add({
+        'role': 'user',
+        'content': [
+          {'type': 'text', 'text': userMessage},
+          {'type': 'image_url', 'image_url': {'url': 'data:$mimeType;base64,$imageBase64'}},
+        ],
+      });
+    } else {
+      messages.add({'role': 'user', 'content': userMessage});
+    }
+
+    final response = await http.post(
+      Uri.parse(config.apiEndpoint),
+      headers: {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Authorization': 'Bearer $_apiKey',
+      },
+      body: utf8.encode(jsonEncode({
+        'model': config.modelId,
+        'messages': messages,
+        'temperature': 0.7,
+        'max_tokens': 4096,
+      })),
+    );
+
+    if (response.statusCode == 200) {
+      final body = utf8.decode(response.bodyBytes);
+      final data = jsonDecode(body);
+      return data['choices'][0]['message']['content'] ?? '无响应内容';
+    } else {
+      final body = utf8.decode(response.bodyBytes);
+      return 'API错误 (${response.statusCode}): $body';
+    }
+  }
+  
+  /// DeepSeek API 支持多模态
+  Future<String> _chatDeepSeekWithImage(
+    AIModelConfig config,
+    String userMessage,
+    List<AIMessage>? history, {
+    String? imageBase64,
+    String mimeType = 'image/jpeg',
+  }) async {
+    final messages = <Map<String, dynamic>>[
+      {'role': 'system', 'content': '你是一个专业的编程助手，帮助用户解决代码问题。请用中文回答。'},
+      if (history != null) ...history.map((m) => m.toJson()),
+    ];
+    
+    // 添加用户消息（支持多模态）
+    if (imageBase64 != null && imageBase64.isNotEmpty) {
+      messages.add({
+        'role': 'user',
+        'content': [
+          {'type': 'text', 'text': userMessage},
+          {'type': 'image_url', 'image_url': {'url': 'data:$mimeType;base64,$imageBase64'}},
+        ],
+      });
+    } else {
+      messages.add({'role': 'user', 'content': userMessage});
+    }
+
+    final response = await http.post(
+      Uri.parse(config.apiEndpoint),
+      headers: {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Authorization': 'Bearer $_apiKey',
+      },
+      body: utf8.encode(jsonEncode({
+        'model': config.modelId,
+        'messages': messages,
+        'temperature': 0.7,
+        'max_tokens': 4096,
+      })),
+    );
+
+    debugPrint('DeepSeek multimodal response status: ${response.statusCode}');
+    
+    if (response.statusCode == 200) {
+      final body = utf8.decode(response.bodyBytes);
+      final data = jsonDecode(body);
+      return data['choices'][0]['message']['content'] ?? '无响应内容';
+    } else {
+      final body = utf8.decode(response.bodyBytes);
+      return 'API错误 (${response.statusCode}): $body';
+    }
+  }
+  
+  /// Ollama API 支持多模态（部分模型如 llava）
+  Future<String> _chatOllamaWithImage(
+    AIModelConfig config,
+    String userMessage,
+    List<AIMessage>? history, {
+    String? imageBase64,
+    String mimeType = 'image/jpeg',
+  }) async {
+    // Ollama 多模态使用 base64 图片
+    final messages = <Map<String, dynamic>>[
+      {
+        'role': 'user',
+        'content': userMessage,
+        'images': imageBase64 != null && imageBase64.isNotEmpty ? [imageBase64] : null,
+      },
+    ];
+
+    final response = await http.post(
+      Uri.parse(config.apiEndpoint),
+      headers: {'Content-Type': 'application/json; charset=utf-8'},
+      body: utf8.encode(jsonEncode({
+        'model': config.modelId,
+        'messages': messages,
+        'stream': false,
+      })),
+    );
+
+    if (response.statusCode == 200) {
+      final body = utf8.decode(response.bodyBytes);
+      final data = jsonDecode(body);
+      return data['message']['content'] ?? '无响应';
+    } else {
+      return 'Ollama连接失败，请确保Ollama服务正在运行并支持多模态 (localhost:11434)';
     }
   }
 
@@ -868,13 +1199,79 @@ $code
   Future<String> _chatOpenClaw(
     AIModelConfig config,
     String userMessage,
-    List<AIMessage>? history,
-  ) async {
+    List<AIMessage>? history, {
+    String? imageBase64,
+    String mimeType = 'image/jpeg',
+  }) async {
     final messages = <Map<String, dynamic>>[
       {'role': 'system', 'content': '你是一个专业的编程助手，帮助用户解决代码问题。请用中文回答。'},
       if (history != null) ...history.map((m) => m.toJson()),
-      {'role': 'user', 'content': userMessage},
     ];
+    
+    // 添加用户消息（支持多模态）
+    if (imageBase64 != null && imageBase64.isNotEmpty) {
+      // 多模态消息
+      messages.add({
+        'role': 'user',
+        'content': [
+          {'type': 'text', 'text': userMessage},
+          {'type': 'image_url', 'image_url': {'url': 'data:$mimeType;base64,$imageBase64'}},
+        ],
+      });
+    } else {
+      // 纯文本消息
+      messages.add({'role': 'user', 'content': userMessage});
+    }
+
+    // 创建接受自签名证书的 HttpClient
+    final httpClient = HttpClient()
+      ..badCertificateCallback = (cert, host, port) => true;
+
+    try {
+      final uri = Uri.parse(config.apiEndpoint);
+      final httpRequest = await httpClient.postUrl(uri);
+      
+      httpRequest.headers.set('Content-Type', 'application/json; charset=utf-8');
+      httpRequest.headers.set('Authorization', 'Bearer $_apiKey');
+      httpRequest.headers.set('x-openclaw-model', _openclawSubModel);
+      
+      httpRequest.write(utf8.encode(jsonEncode({
+        'model': config.modelId,
+        'messages': messages,
+        'temperature': 0.7,
+        'max_tokens': 4096,
+      })));
+
+      final httpResponse = await httpRequest.close();
+      final responseBody = await httpResponse.transform(utf8.decoder).join();
+
+      debugPrint('OpenClaw response status: ${httpResponse.statusCode}');
+
+      if (httpResponse.statusCode == 200) {
+        final data = jsonDecode(responseBody);
+        return data['choices'][0]['message']['content'] ?? '无响应内容';
+      } else {
+        return 'OpenClaw API错误 (${httpResponse.statusCode}): $responseBody';
+      }
+    } finally {
+      httpClient.close();
+    }
+  }
+  
+  /// OpenClaw API (支持自签名证书) - 使用 AIMessage 多模态消息
+  Future<String> _chatOpenClawWithMessages(
+    AIModelConfig config,
+    List<AIMessage> allMessages,
+  ) async {
+    final messages = <Map<String, dynamic>>[];
+    
+    // 添加系统消息
+    messages.add({'role': 'system', 'content': '你是一个专业的编程助手，帮助用户解决代码问题。请用中文回答。'});
+    
+    // 添加历史消息和当前消息
+    for (final msg in allMessages) {
+      messages.add(msg.toJson());
+    }
 
     final requestBody = jsonEncode({
       'model': config.modelId,

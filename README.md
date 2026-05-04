@@ -7,7 +7,7 @@ Miss IDE 是一款专为移动设备设计的智能集成开发环境，参考 A
 ## ✨ 核心特性
 
 ### 🤖 AI 智能助手
-- **多模型支持**：通义千问、DeepSeek、豆包、Minimax、智谱清言、GPT、Claude、Gemini、Ollama
+- **多模型支持**：通义千问、DeepSeek、豆包、Minimax、智谱清言、GPT、Claude、Gemini、XiaoMi mimo、Ollama
 - **代码补全**：智能代码补全，提升编码效率
 - **代码解释**：快速理解代码逻辑
 - **代码重构**：优化代码结构

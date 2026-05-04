@@ -879,36 +879,35 @@ $code
     // 创建接受自签名证书的 HttpClient
     final httpClient = HttpClient()
       ..badCertificateCallback = (cert, host, port) => true;
-    final ioClient = http.IOClient(httpClient);
 
     try {
-      final response = await ioClient.post(
-        Uri.parse(config.apiEndpoint),
-        headers: {
-          'Content-Type': 'application/json; charset=utf-8',
-          'Authorization': 'Bearer $_apiKey',
-          'x-openclaw-model': _openclawSubModel,
-        },
-        body: utf8.encode(jsonEncode({
-          'model': config.modelId,
-          'messages': messages,
-          'temperature': 0.7,
-          'max_tokens': 4096,
-        })),
-      );
+      final uri = Uri.parse(config.apiEndpoint);
+      final httpRequest = await httpClient.postUrl(uri);
+      
+      httpRequest.headers.set('Content-Type', 'application/json; charset=utf-8');
+      httpRequest.headers.set('Authorization', 'Bearer $_apiKey');
+      httpRequest.headers.set('x-openclaw-model', _openclawSubModel);
+      
+      httpRequest.write(utf8.encode(jsonEncode({
+        'model': config.modelId,
+        'messages': messages,
+        'temperature': 0.7,
+        'max_tokens': 4096,
+      })));
 
-      debugPrint('OpenClaw response status: ${response.statusCode}');
+      final httpResponse = await httpRequest.close();
+      final responseBody = await httpResponse.transform(utf8.decoder).join();
 
-      if (response.statusCode == 200) {
-        final body = utf8.decode(response.bodyBytes);
-        final data = jsonDecode(body);
+      debugPrint('OpenClaw response status: ${httpResponse.statusCode}');
+
+      if (httpResponse.statusCode == 200) {
+        final data = jsonDecode(responseBody);
         return data['choices'][0]['message']['content'] ?? '无响应内容';
       } else {
-        final body = utf8.decode(response.bodyBytes);
-        return 'OpenClaw API错误 (${response.statusCode}): $body';
+        return 'OpenClaw API错误 (${httpResponse.statusCode}): $responseBody';
       }
     } finally {
-      ioClient.close();
+      httpClient.close();
     }
   }
 }

@@ -18,6 +18,7 @@ class _SettingsPageState extends State<SettingsPage> {
   final _storage = const FlutterSecureStorage();
 
   final List<Map<String, String>> _aiModels = [
+    {'name': 'OpenClaw', 'url': 'https://47.92.220.102', 'desc': '自建AI网关，多模型'},
     {'name': 'DeepSeek', 'url': 'https://platform.deepseek.com', 'desc': '代码能力强，推荐'},
     {'name': '通义千问', 'url': 'https://dashscope.aliyuncs.com', 'desc': '阿里云模型'},
     {'name': '豆包', 'url': 'https://console.volcengine.com/ark', 'desc': '字节跳动'},
@@ -82,6 +83,14 @@ class _SettingsPageState extends State<SettingsPage> {
                 trailing: const Icon(Icons.chevron_right),
                 onTap: () => _showModelSelector(),
               ),
+              if (aiService.selectedModel == 'OpenClaw')
+                ListTile(
+                  leading: const Icon(Icons.tune),
+                  title: const Text('OpenClaw 模型'),
+                  subtitle: Text(_getOpenClawSubModelName(aiService.openclawSubModel)),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => _showOpenClawModelSelector(),
+                ),
               ListTile(
                 leading: const Icon(Icons.key),
                 title: const Text('API Key'),
@@ -453,5 +462,64 @@ class _SettingsPageState extends State<SettingsPage> {
     // 保存设置
     _storage.write(key: 'theme_mode', value: mode.index.toString());
     Navigator.pop(context);
+  }
+
+  String _getOpenClawSubModelName(String modelId) {
+    const subModels = {
+      'modelstudio/qwen3-coder-plus': 'qwen3-coder-plus (代码专精，推荐)',
+      'modelstudio/qwen3.5-plus': 'qwen3.5-plus (通用，百万上下文)',
+      'modelstudio/MiniMax-M2.5': 'MiniMax-M2.5 (推理增强)',
+      'modelstudio/kimi-k2.5': 'kimi-k2.5 (多模态)',
+      'modelstudio/glm-5': 'glm-5 (智谱)',
+    };
+    return subModels[modelId] ?? modelId;
+  }
+
+  void _showOpenClawModelSelector() {
+    final subModels = [
+      {'id': 'modelstudio/qwen3-coder-plus', 'name': 'qwen3-coder-plus', 'desc': '代码专精，推荐'},
+      {'id': 'modelstudio/qwen3.5-plus', 'name': 'qwen3.5-plus', 'desc': '通用，百万上下文'},
+      {'id': 'modelstudio/MiniMax-M2.5', 'name': 'MiniMax-M2.5', 'desc': '推理增强'},
+      {'id': 'modelstudio/kimi-k2.5', 'name': 'kimi-k2.5', 'desc': '多模态'},
+      {'id': 'modelstudio/glm-5', 'name': 'glm-5', 'desc': '智谱'},
+    ];
+
+    showModalBottomSheet(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: Text('选择 OpenClaw 模型', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            ),
+            ...subModels.map((model) => ListTile(
+              leading: Icon(
+                aiService.openclawSubModel == model['id']
+                  ? Icons.radio_button_checked
+                  : Icons.radio_button_off,
+                color: aiService.openclawSubModel == model['id']
+                  ? Theme.of(context).colorScheme.primary
+                  : null,
+              ),
+              title: Text(model['name']!),
+              subtitle: Text(model['desc']!),
+              onTap: () async {
+                await aiService.setOpenclawSubModel(model['id']!);
+                if (mounted) {
+                  Navigator.pop(context);
+                  setState(() {});
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('已切换到 ${model['name']}')),
+                  );
+                }
+              },
+            )),
+            const SizedBox(height: 16),
+          ],
+        ),
+      ),
+    );
   }
 }

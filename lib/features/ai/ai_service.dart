@@ -67,6 +67,7 @@ class AIService {
   String _selectedModel = 'DeepSeek';
   String _apiKey = '';
   bool _isInitialized = false;
+  String _openclawSubModel = 'modelstudio/qwen3-coder-plus';
   
   // AI回调函数
   Function(String)? onProjectCreated;
@@ -126,6 +127,12 @@ class AIService {
       provider: 'ollama',
       apiEndpoint: 'http://localhost:11434/api/chat',
       modelId: 'llama2',
+    ),
+    'OpenClaw': AIModelConfig(
+      name: 'OpenClaw',
+      provider: 'openclaw',
+      apiEndpoint: 'https://47.92.220.102/v1/chat/completions',
+      modelId: 'openclaw',
     ),
   };
 
@@ -225,6 +232,11 @@ main();
       final prefs = await SharedPreferences.getInstance();
       _selectedModel = prefs.getString('ai_selected_model') ?? 'DeepSeek';
       _apiKey = prefs.getString('ai_api_key_$_selectedModel') ?? '';
+      _openclawSubModel = prefs.getString('openclaw_sub_model') ?? 'modelstudio/qwen3-coder-plus';
+      // 如果选择的是 OpenClaw 且没有 API Key，使用默认 key
+      if (_selectedModel == 'OpenClaw' && _apiKey.isEmpty) {
+        _apiKey = '623fe37dd689d5f880757c57d949a6b17aeadb3e8ef89929';
+      }
     } catch (e) {
       debugPrint('AI Service init error: $e');
     }
@@ -239,6 +251,20 @@ main();
   
   /// 检查是否已配置
   bool get isConfigured => _apiKey.isNotEmpty;
+
+  /// 获取 OpenClaw 子模型
+  String get openclawSubModel => _openclawSubModel;
+
+  /// 设置 OpenClaw 子模型
+  Future<void> setOpenclawSubModel(String model) async {
+    _openclawSubModel = model;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('openclaw_sub_model', model);
+    } catch (e) {
+      debugPrint('Failed to save OpenClaw sub model: $e');
+    }
+  }
 
   /// 获取所有模型名称
   List<String> get modelNames => _models.keys.toList();
@@ -575,6 +601,9 @@ $code
         case 'openai':
           response = await _chatOpenAI(config, userMessage, history);
           break;
+        case 'openclaw':
+          response = await _chatOpenClaw(config, userMessage, history);
+          break;
         default:
           response = await _chatDeepSeek(config, userMessage, history);
       }
@@ -597,6 +626,7 @@ $code
       'Gemini': 'makersuite.google.com',
       'GPT-4': 'platform.openai.com',
       'Claude': 'console.anthropic.com',
+      'OpenClaw': 'https://47.92.220.102',
     };
     return urls[modelName] ?? '';
   }
@@ -831,6 +861,54 @@ $code
       return data['message']['content'] ?? '无响应';
     } else {
       return 'Ollama连接失败，请确保Ollama服务正在运行 (localhost:11434)';
+    }
+  }
+
+  /// OpenClaw API (支持自签名证书)
+  Future<String> _chatOpenClaw(
+    AIModelConfig config,
+    String userMessage,
+    List<AIMessage>? history,
+  ) async {
+    final messages = <Map<String, dynamic>>[
+      {'role': 'system', 'content': '你是一个专业的编程助手，帮助用户解决代码问题。请用中文回答。'},
+      if (history != null) ...history.map((m) => m.toJson()),
+      {'role': 'user', 'content': userMessage},
+    ];
+
+    // 创建接受自签名证书的 HttpClient
+    final httpClient = HttpClient()
+      ..badCertificateCallback = (cert, host, port) => true;
+    final ioClient = http.IOClient(httpClient);
+
+    try {
+      final response = await ioClient.post(
+        Uri.parse(config.apiEndpoint),
+        headers: {
+          'Content-Type': 'application/json; charset=utf-8',
+          'Authorization': 'Bearer $_apiKey',
+          'x-openclaw-model': _openclawSubModel,
+        },
+        body: utf8.encode(jsonEncode({
+          'model': config.modelId,
+          'messages': messages,
+          'temperature': 0.7,
+          'max_tokens': 4096,
+        })),
+      );
+
+      debugPrint('OpenClaw response status: ${response.statusCode}');
+
+      if (response.statusCode == 200) {
+        final body = utf8.decode(response.bodyBytes);
+        final data = jsonDecode(body);
+        return data['choices'][0]['message']['content'] ?? '无响应内容';
+      } else {
+        final body = utf8.decode(response.bodyBytes);
+        return 'OpenClaw API错误 (${response.statusCode}): $body';
+      }
+    } finally {
+      ioClient.close();
     }
   }
 }

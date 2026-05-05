@@ -6,7 +6,7 @@ import 'package:miss_ide/features/ai/ai_chat.dart';
 import 'package:miss_ide/features/settings/settings_page.dart';
 import 'package:miss_ide/features/file_manager/file_browser.dart';
 import 'package:miss_ide/features/build/build.dart';
-import 'core/logger.dart';
+import 'package:miss_ide/core/logger.dart';
 
 /// 全局主题模式通知器
 final ValueNotifier<ThemeMode> themeModeNotifier = ValueNotifier(ThemeMode.system);

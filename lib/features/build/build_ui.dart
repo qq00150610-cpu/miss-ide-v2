@@ -1002,7 +1002,7 @@ class _BuildPageState extends ConsumerState<BuildPage> {
         MissLogger.info('BuildUI', '开始下载 APK: $apkPath');
         
         // 通过服务下载到本地
-        final localPath = await buildService.downloadApk(apkPath);
+        final localPath = await buildService.downloadApkFile(apkPath);
         if (localPath != null && mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(

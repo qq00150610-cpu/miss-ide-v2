@@ -558,6 +558,37 @@ class BuildService {
     return '⏳';
   }
 
+  /// 下载 APK 文件到本地（公开方法）
+  /// 如果是 GitHub 产物 URL，需要先获取 token
+  Future<String?> downloadApkFile(String url) async {
+    try {
+      final token = await _githubToken;
+      if (url.contains('api.github.com') && token.isNotEmpty) {
+        return await _downloadArtifact(url, token);
+      }
+      
+      // 直接 URL 下载
+      final response = await http.get(Uri.parse(url));
+      if (response.statusCode == 200) {
+        final docDir = await getApplicationDocumentsDirectory();
+        final downloadDir = Directory(p.join(docDir.path, 'downloads'));
+        if (!await downloadDir.exists()) {
+          await downloadDir.create(recursive: true);
+        }
+        final apkPath = p.join(
+          downloadDir.path,
+          'miss-ide-${DateTime.now().millisecondsSinceEpoch}.apk',
+        );
+        await File(apkPath).writeAsBytes(response.bodyBytes);
+        MissLogger.success(_tag, 'APK 已下载: $apkPath');
+        return apkPath;
+      }
+    } catch (e) {
+      MissLogger.error(_tag, '下载APK失败: $e');
+    }
+    return null;
+  }
+
   /// 获取历史记录
   List<BuildHistoryItem> getHistory() => List.from(_buildHistory);
 

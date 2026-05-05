@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 /// VS Code Dark+ 风格语法高亮工具类
 /// 不使用第三方包，自己实现基础语法高亮
+/// 【重要】支持中文/中文字符串的正确高亮，不再按单词拆分中文
 class SyntaxHighlighter {
   // 参考极影桌面IDE的语法高亮颜色（VS Code Dark+ 风格）
   // 关键字：蓝色
@@ -137,25 +138,42 @@ class SyntaxHighlighter {
   }
   
   /// 对代码文本进行语法高亮
+  /// 【改进】正确处理中文：不拆分中文为"单词"，字符串和注释中的中文正常显示颜色
   static List<TextSpan> highlight(String code, String language, {
     Color defaultColor = Colors.white,
     double fontSize = 14,
   }) {
     final keywords = getKeywords(language);
+    
+    // 判断是否包含大量中文 - 如果是纯中文文档/注释，使用简化模式避免错误高亮
+    if (_isChineseDominant(code)) {
+      return _simpleHighlight(code, defaultColor, fontSize);
+    }
+    
     final spans = <TextSpan>[];
     
-    // 正则表达式 - 简化模式
-    final stringRegex = RegExp(r'"[^"]*"|' + r"'[^']*'");
+    // 支持中英文引号的字符串匹配
+    // 中文引号：「」"" '' 【】《》等
+    final stringRegex = RegExp(
+      r'"[^"]*"|'    // 英文双引号
+      r"'[^']*'|"    // 英文单引号
+      r'“[^”]*”|'    // 中文左双引号-右双引号
+      r'‘[^’]*’|'    // 中文左单引号-右单引号
+      r'「[^」]*」|'  // 中文「」
+      r'【[^】]*】'   // 中文【】
+    );
     final singleLineCommentRegex = RegExp(r'//.*$', multiLine: true);
     final multiLineCommentRegex = RegExp(r'/\*[\s\S]*?\*/');
     final numberRegex = RegExp(r'\b\d+\.?\d*\b');
-    final wordRegex = RegExp(r'\b\w+\b');
+    // 【关键修复】只匹配字母开头的单词，不匹配中文汉字
+    // 原来用 \b\w+\b 会匹配中文单字，导致中文被拆散
+    final wordRegex = RegExp(r'[a-zA-Z_]\w*');
     final annotationRegex = RegExp(r'@\w+');
     
     // 收集所有需要高亮的区域
     final regions = <_HighlightRegion>[];
     
-    // 匹配字符串
+    // 匹配字符串（包括中文引号内的内容）
     for (final match in stringRegex.allMatches(code)) {
       regions.add(_HighlightRegion(
         start: match.start,
@@ -167,7 +185,6 @@ class SyntaxHighlighter {
     
     // 匹配单行注释
     for (final match in singleLineCommentRegex.allMatches(code)) {
-      // 排除字符串内的注释标记
       bool inString = regions.any((r) => 
         r.type == 'string' && match.start >= r.start && match.start < r.end
       );
@@ -191,13 +208,9 @@ class SyntaxHighlighter {
       ));
     }
     
-    // 匹配注解 (主要用于 Java/Kotlin/Dart)
+    // 匹配注解
     for (final match in annotationRegex.allMatches(code)) {
-      bool inCommentOrString = regions.any((r) =>
-        (r.type == 'comment' || r.type == 'string') &&
-        match.start >= r.start && match.end <= r.end
-      );
-      if (!inCommentOrString) {
+      if (!_isInsideRegion(match.start, match.end, regions)) {
         regions.add(_HighlightRegion(
           start: match.start,
           end: match.end,
@@ -209,11 +222,7 @@ class SyntaxHighlighter {
     
     // 匹配数字
     for (final match in numberRegex.allMatches(code)) {
-      bool inCommentOrString = regions.any((r) =>
-        (r.type == 'comment' || r.type == 'string') &&
-        match.start >= r.start && match.end <= r.end
-      );
-      if (!inCommentOrString) {
+      if (!_isInsideRegion(match.start, match.end, regions)) {
         regions.add(_HighlightRegion(
           start: match.start,
           end: match.end,
@@ -223,16 +232,11 @@ class SyntaxHighlighter {
       }
     }
     
-    // 匹配关键词和标识符
+    // 匹配关键词和标识符（只匹配英文字母单词，不碰中文）
     for (final match in wordRegex.allMatches(code)) {
-      bool inCommentOrString = regions.any((r) =>
-        (r.type == 'comment' || r.type == 'string') &&
-        match.start >= r.start && match.end <= r.end
-      );
-      if (!inCommentOrString) {
+      if (!_isInsideRegion(match.start, match.end, regions)) {
         final word = match.group(0)!;
         
-        // 检查是否是关键词
         if (keywords.contains(word)) {
           regions.add(_HighlightRegion(
             start: match.start,
@@ -240,18 +244,14 @@ class SyntaxHighlighter {
             color: keywordColor,
             type: 'keyword',
           ));
-        }
-        // 检查是否是函数调用（后面跟着括号）
-        else if (_isFunctionCall(code, match.end)) {
+        } else if (_isFunctionCall(code, match.end)) {
           regions.add(_HighlightRegion(
             start: match.start,
             end: match.end,
             color: functionColor,
             type: 'function',
           ));
-        }
-        // 检查是否是大写开头的类型
-        else if (word.isNotEmpty && word[0] == word[0].toUpperCase() && word.contains(RegExp(r'[a-z]'))) {
+        } else if (_isTypeName(word)) {
           regions.add(_HighlightRegion(
             start: match.start,
             end: match.end,
@@ -265,8 +265,8 @@ class SyntaxHighlighter {
     // 按起始位置排序
     regions.sort((a, b) => a.start.compareTo(b.start));
     
-    // 去除重叠区域（保留高优先级）
-    final priorityMap = {'keyword': 5, 'type': 4, 'function': 3, 'number': 2, 'string': 2, 'comment': 1, 'annotation': 3};
+    // 去除重叠区域
+    final priorityMap = {'keyword': 5, 'type': 4, 'function': 3, 'annotation': 3, 'number': 2, 'string': 2, 'comment': 1};
     final filteredRegions = _removeOverlapping(regions, priorityMap);
     
     // 构建 TextSpan 列表
@@ -300,6 +300,76 @@ class SyntaxHighlighter {
         : spans;
   }
   
+  /// 判断代码是否以中文为主（中文占比 > 20%）
+  /// 如果是纯中文文档/说明，使用简化高亮模式
+  static bool _isChineseDominant(String code) {
+    if (code.isEmpty) return false;
+    
+    final chineseRegex = RegExp(r'[\u4e00-\u9fff]');
+    final chineseCount = chineseRegex.allMatches(code).length;
+    
+    return chineseCount > code.length * 0.2;
+  }
+  
+  /// 简化高亮模式：只做字符串和注释高亮，不对中文做关键词匹配
+  static List<TextSpan> _simpleHighlight(String code, Color defaultColor, double fontSize) {
+    final spans = <TextSpan>[];
+    
+    // 匹配字符串（中英文引号都支持）
+    final stringRegex = RegExp(
+      r'"[^"]*"|' + r"'[^']*'" + 
+      r'|“[^”]*”|' + r'‘[^’]*’' + 
+      r'|「[^」]*」|【[^】]*】'
+    );
+    final singleLineCommentRegex = RegExp(r'//.*$', multiLine: true);
+    
+    final regions = <_HighlightRegion>[];
+    
+    // 匹配字符串
+    for (final match in stringRegex.allMatches(code)) {
+      regions.add(_HighlightRegion(start: match.start, end: match.end, color: stringColor, type: 'string'));
+    }
+    
+    // 匹配注释
+    for (final match in singleLineCommentRegex.allMatches(code)) {
+      if (!_isInsideRegion(match.start, match.end, regions)) {
+        regions.add(_HighlightRegion(start: match.start, end: match.end, color: commentColor, type: 'comment'));
+      }
+    }
+    
+    regions.sort((a, b) => a.start.compareTo(b.start));
+    
+    int currentPos = 0;
+    for (final region in regions) {
+      if (region.start > currentPos) {
+        spans.add(TextSpan(text: code.substring(currentPos, region.start), 
+          style: TextStyle(color: defaultColor, fontSize: fontSize)));
+      }
+      spans.add(TextSpan(text: code.substring(region.start, region.end), 
+        style: TextStyle(color: region.color, fontSize: fontSize)));
+      currentPos = region.end;
+    }
+    if (currentPos < code.length) {
+      spans.add(TextSpan(text: code.substring(currentPos), 
+        style: TextStyle(color: defaultColor, fontSize: fontSize)));
+    }
+    
+    return spans.isEmpty 
+        ? [TextSpan(text: code, style: TextStyle(color: defaultColor, fontSize: fontSize))]
+        : spans;
+  }
+  
+  /// 检查位置是否在已有高亮区域内
+  static bool _isInsideRegion(int start, int end, List<_HighlightRegion> regions) {
+    return regions.any((r) => start >= r.start && end <= r.end);
+  }
+  
+  /// 判断是否是类型名（首字母大写且有其他小写字母）
+  static bool _isTypeName(String word) {
+    if (word.isEmpty) return false;
+    return word[0] == word[0].toUpperCase() && word != word.toUpperCase() && RegExp(r'[a-z]').hasMatch(word);
+  }
+  
   /// 检查是否是函数调用
   static bool _isFunctionCall(String code, int position) {
     if (position >= code.length) return false;
@@ -325,12 +395,10 @@ class SyntaxHighlighter {
       bool overlaps = false;
       for (final existing in result) {
         if (region.start < existing.end && region.end > existing.start) {
-          // 区域重叠
           final regionPriority = priorityMap[region.type] ?? 0;
           final existingPriority = priorityMap[existing.type] ?? 0;
           
           if (regionPriority > existingPriority) {
-            // 用新的替换旧的
             result.remove(existing);
             break;
           } else {

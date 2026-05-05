@@ -125,8 +125,7 @@ class BuildHistoryPage extends StatelessWidget {
           ),
           FilledButton(
             onPressed: () {
-              // 删除指定记录
-              // 注意：当前实现是清空所有，实际可以改进为删除单条
+              buildService.removeHistoryItem(index);
               Navigator.pop(context);
             },
             style: FilledButton.styleFrom(

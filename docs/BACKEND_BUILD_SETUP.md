@@ -2,9 +2,9 @@
 
 ## 1. 服务器环境准备
 
-连接到阿里云服务器：
+连接到你的服务器（请替换为实际IP）：
 ```bash
-ssh root@47.92.220.102
+ssh root@your-server-ip
 ```
 
 ## 2. 安装 Flutter SDK
@@ -267,7 +267,7 @@ nohup python3 build_api.py > build.log 2>&1 &
 # /etc/nginx/sites-available/build-api:
 # server {
 #     listen 80;
-#     server_name 47.92.220.102;
+#     server_name your-server-ip;
 #     
 #     location /api/build/ {
 #         proxy_pass http://127.0.0.1:8080;

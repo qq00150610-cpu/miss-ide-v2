@@ -8,6 +8,7 @@ import 'build_service.dart';
 import 'build_progress.dart';
 import 'build_history.dart';
 import 'signing_manager.dart';
+import '../../core/logger.dart';
 
 /// 构建配置 Provider
 final buildConfigProvider = StateProvider<BuildConfig>((ref) => BuildConfig(
@@ -40,7 +41,7 @@ class _BuildPageState extends ConsumerState<BuildPage> {
   bool _isBuilding = false;
   BuildHistoryItem? _currentBuild;
   String? _selectedSigningConfig;
-  bool _useGitHubBuild = true;  // 默认使用 GitHub 构建
+  // 使用 GitHub Actions 云端构建（推荐方式）
 
   @override
   void initState() {
@@ -251,38 +252,37 @@ class _BuildPageState extends ConsumerState<BuildPage> {
     );
   }
   
-  /// 构建方式选择
+  /// 构建方式说明
   Widget _buildBuildMethodSection(ColorScheme colorScheme) {
     return _buildSection(
       colorScheme,
       title: '构建方式',
       icon: Icons.cloud,
       children: [
-        RadioListTile<bool>(
-          title: const Text('GitHub Actions 云端构建'),
-          subtitle: const Text('自动构建并下载 APK，无需本地环境'),
-          value: true,
-          groupValue: _useGitHubBuild,
-          onChanged: (value) {
-            setState(() => _useGitHubBuild = value ?? true);
-            final config = ref.read(buildConfigProvider);
-            ref.read(buildConfigProvider.notifier).state = config.copyWith(
-              useGitHubBuild: true,
-            );
-          },
-        ),
-        RadioListTile<bool>(
-          title: const Text('后端 API 构建'),
-          subtitle: const Text('通过远程服务器构建'),
-          value: false,
-          groupValue: _useGitHubBuild,
-          onChanged: (value) {
-            setState(() => _useGitHubBuild = value ?? true);
-            final config = ref.read(buildConfigProvider);
-            ref.read(buildConfigProvider.notifier).state = config.copyWith(
-              useGitHubBuild: false,
-            );
-          },
+        Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            children: [
+              Icon(Icons.check_circle, color: Colors.green.shade600, size: 20),
+              const SizedBox(width: 12),
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'GitHub Actions 云端构建',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    SizedBox(height: 4),
+                    Text(
+                      '自动在 GitHub 服务器上构建并下载 APK，无需本地环境',
+                      style: TextStyle(fontSize: 13),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
       ],
     );
@@ -302,7 +302,7 @@ class _BuildPageState extends ConsumerState<BuildPage> {
         enableProguard: config.enableProguard,
         outputPath: config.outputPath,
         signingConfig: config.signingConfig,
-        useGitHubBuild: _useGitHubBuild,
+        useGitHubBuild: true,
       );
       
       if (mounted) {
@@ -952,21 +952,13 @@ class _BuildPageState extends ConsumerState<BuildPage> {
     try {
       BuildHistoryItem? result;
       
-      if (_useGitHubBuild) {
-        // GitHub 构建
-        result = await buildService.triggerGitHubBuild(
-          projectName: config.projectName,
-          buildType: config.buildType,
-          branch: 'main',
-        );
-      } else {
-        // 本地/后端构建
-        result = await buildService.triggerBuild(
-          projectName: config.projectName,
-          buildType: config.buildType,
-          projectPath: config.projectPath,
-        );
-      }
+      // GitHub Actions 云端构建（推荐方式）
+      MissLogger.info('BuildUI', '开始 GitHub Actions 构建...');
+      result = await buildService.triggerGitHubBuild(
+        projectName: config.projectName,
+        buildType: config.buildType,
+        branch: 'main',
+      );
 
       if (result != null) {
         setState(() => _currentBuild = result);
@@ -1006,24 +998,36 @@ class _BuildPageState extends ConsumerState<BuildPage> {
     try {
       // 如果是远程 URL，直接下载
       if (apkPath.startsWith('http')) {
-        // 复制到剪贴板
-        Clipboard.setData(ClipboardData(text: apkPath));
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('APK 链接已复制到剪贴板'),
-            action: SnackBarAction(
-              label: '打开',
-              onPressed: () {
-                // TODO: 使用 url_launcher 打开链接
-              },
+        // 使用 url_launcher 打开链接或提供下载选项
+        MissLogger.info('BuildUI', '开始下载 APK: $apkPath');
+        
+        // 通过服务下载到本地
+        final localPath = await buildService.downloadApk(apkPath);
+        if (localPath != null && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('APK 已下载到: $localPath'),
+              duration: const Duration(seconds: 5),
             ),
-          ),
-        );
+          );
+        } else if (mounted) {
+          // 备用：复制链接到剪贴板
+          Clipboard.setData(ClipboardData(text: apkPath));
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Text('APK 链接已复制到剪贴板'),
+              duration: const Duration(seconds: 3),
+            ),
+          );
+        }
       } else {
         // 本地文件路径
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('APK 路径: $apkPath')),
-        );
+        MissLogger.info('BuildUI', 'APK 本地路径: $apkPath');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('APK 路径: $apkPath')),
+          );
+        }
       }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(

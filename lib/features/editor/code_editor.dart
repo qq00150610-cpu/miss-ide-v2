@@ -163,7 +163,7 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
   String _currentFilePath = '';
   String _currentLanguage = 'Dart';
   String? _currentProjectPath;
-  bool _isDirectoryExpanded = false;
+  bool _isDirectoryExpanded = true; // 默认展开目录面板
   
   // 当前编码
   String _currentEncoding = 'UTF-8';
@@ -197,6 +197,10 @@ class _CodeEditorPageState extends State<CodeEditorPage> {
     }
     if (widget.filePath != null) {
       _loadFile(widget.filePath!);
+    }
+    // 如果从项目页跳转过来且有文件路径，直接打开
+    if (widget.filePath != null) {
+      _isDirectoryExpanded = true;
     }
     // 加载编辑器设置
     _loadEditorSettings();

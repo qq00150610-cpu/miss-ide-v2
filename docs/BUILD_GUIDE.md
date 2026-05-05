@@ -108,7 +108,7 @@ lib/features/build/
 ## API 端点
 
 - **GitHub Actions**: `https://api.github.com/repos/{owner}/{repo}/actions/workflows`
-- **后端服务**: `http://47.92.220.102`
+- **后端服务**: `http://your-server-ip:8080`（在设置中自定义配置）
 
 ## 注意事项
 

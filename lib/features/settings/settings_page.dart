@@ -18,7 +18,6 @@ class _SettingsPageState extends State<SettingsPage> {
   final _storage = const FlutterSecureStorage();
 
   final List<Map<String, String>> _aiModels = [
-    {'name': 'OpenClaw', 'url': 'https://47.92.220.102', 'desc': '自建AI网关，多模型'},
     {'name': 'DeepSeek', 'url': 'https://platform.deepseek.com', 'desc': '代码能力强，推荐'},
     {'name': '通义千问', 'url': 'https://dashscope.aliyuncs.com', 'desc': '阿里云模型'},
     {'name': '豆包', 'url': 'https://console.volcengine.com/ark', 'desc': '字节跳动'},
@@ -91,6 +90,14 @@ class _SettingsPageState extends State<SettingsPage> {
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () => _showOpenClawModelSelector(),
                 ),
+              if (aiService.selectedModel == 'OpenClaw')
+                ListTile(
+                  leading: const Icon(Icons.link),
+                  title: const Text('API Endpoint'),
+                  subtitle: Text(_getOpenClawEndpoint()),
+                  trailing: const Icon(Icons.edit),
+                  onTap: () => _showOpenClawEndpointDialog(),
+                ),
               ListTile(
                 leading: const Icon(Icons.key),
                 title: const Text('API Key'),
@@ -152,6 +159,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 subtitle: const Text('GitHub Settings > Developer settings'),
                 onTap: () => _launchUrl('https://github.com/settings/tokens?type=beta'),
               ),
+
             ],
           ),
           
@@ -465,6 +473,7 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   String _getOpenClawSubModelName(String modelId) {
+    if (modelId.isEmpty) return '未选择，点击选择模型';
     const subModels = {
       'zhipu/glm-4-plus': 'glm-4-plus (推荐，智谱最强)',
       'zhipu/glm-4-flash': 'glm-4-flash (智谱免费)',
@@ -522,4 +531,73 @@ class _SettingsPageState extends State<SettingsPage> {
       ),
     );
   }
+
+  String _getOpenClawEndpoint() {
+    final config = aiService.getModelConfig('OpenClaw');
+    if (config != null && config.apiEndpoint.isNotEmpty) {
+      return config.apiEndpoint;
+    }
+    return '未配置，点击设置自定义 API Endpoint';
+  }
+
+  void _showOpenClawEndpointDialog() {
+    final config = aiService.getModelConfig('OpenClaw');
+    final controller = TextEditingController(
+      text: config?.apiEndpoint ?? '',
+    );
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('OpenClaw API Endpoint'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              '请输入自定义 API 地址（完整URL，含 /v1/chat/completions）',
+              style: TextStyle(fontSize: 12, color: Colors.grey),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              decoration: const InputDecoration(
+                hintText: 'https://your-server.com/v1/chat/completions',
+                border: OutlineInputBorder(),
+              ),
+              maxLines: 2,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () async {
+              final endpoint = controller.text.trim();
+              if (endpoint.isNotEmpty && !endpoint.startsWith('http')) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('请输入有效的URL（以 http:// 或 https:// 开头）')),
+                );
+                return;
+              }
+              await aiService.saveOpenClawEndpoint(endpoint);
+              if (mounted) {
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text(endpoint.isEmpty ? '已重置 API Endpoint' : 'API Endpoint 已保存')),
+                );
+                setState(() {});
+              }
+            },
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+  }
+
+
 }

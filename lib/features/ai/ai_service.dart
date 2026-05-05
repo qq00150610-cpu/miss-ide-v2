@@ -84,6 +84,20 @@ class AIModelConfig {
     required this.apiEndpoint,
     required this.modelId,
   });
+  
+  AIModelConfig copyWith({
+    String? name,
+    String? provider,
+    String? apiEndpoint,
+    String? modelId,
+  }) {
+    return AIModelConfig(
+      name: name ?? this.name,
+      provider: provider ?? this.provider,
+      apiEndpoint: apiEndpoint ?? this.apiEndpoint,
+      modelId: modelId ?? this.modelId,
+    );
+  }
 }
 
 /// 项目结构模板
@@ -124,7 +138,7 @@ class AIService {
   String _selectedModel = 'DeepSeek';
   String _apiKey = '';
   bool _isInitialized = false;
-  String _openclawSubModel = 'zhipu/glm-4-plus';
+  String _openclawSubModel = '';  // 从安全存储加载
   
   // AI回调函数
   Function(String)? onProjectCreated;
@@ -188,7 +202,7 @@ class AIService {
     'OpenClaw': AIModelConfig(
       name: 'OpenClaw',
       provider: 'openclaw',
-      apiEndpoint: 'https://47.92.220.102/v1/chat/completions',
+      apiEndpoint: '',  // 将在初始化时加载
       modelId: 'openclaw',
     ),
   };
@@ -289,10 +303,19 @@ main();
       final prefs = await SharedPreferences.getInstance();
       _selectedModel = prefs.getString('ai_selected_model') ?? 'DeepSeek';
       _apiKey = prefs.getString('ai_api_key_$_selectedModel') ?? '';
-      _openclawSubModel = prefs.getString('openclaw_sub_model') ?? 'zhipu/glm-4-plus';
-      // 如果选择的是 OpenClaw 且没有 API Key，使用默认 key
+      _openclawSubModel = prefs.getString('openclaw_sub_model') ?? '';
+      
+      // 加载 OpenClaw API Endpoint 配置
+      if (_models['OpenClaw'] != null) {
+        final savedEndpoint = prefs.getString('openclaw_api_endpoint') ?? '';
+        _models['OpenClaw'] = _models['OpenClaw']!.copyWith(
+          apiEndpoint: savedEndpoint,
+        );
+      }
+      
+      // 如果选择的是 OpenClaw 且没有 API Key，提示用户配置
       if (_selectedModel == 'OpenClaw' && _apiKey.isEmpty) {
-        _apiKey = '623fe37dd689d5f880757c57d949a6b17aeadb3e8ef89929';
+        debugPrint('[安全提示] OpenClaw API Key 未配置，请在设置中手动输入');
       }
     } catch (e) {
       debugPrint('AI Service init error: $e');
@@ -311,6 +334,25 @@ main();
 
   /// 获取 OpenClaw 子模型
   String get openclawSubModel => _openclawSubModel;
+
+  /// 获取模型配置
+  AIModelConfig? getModelConfig(String modelName) {
+    return _models[modelName];
+  }
+
+  /// 保存 OpenClaw API Endpoint
+  Future<void> saveOpenClawEndpoint(String endpoint) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('openclaw_api_endpoint', endpoint);
+      if (_models['OpenClaw'] != null) {
+        _models['OpenClaw'] = _models['OpenClaw']!.copyWith(apiEndpoint: endpoint);
+      }
+      debugPrint('OpenClaw endpoint saved');
+    } catch (e) {
+      debugPrint('Failed to save OpenClaw endpoint: $e');
+    }
+  }
 
   /// 设置 OpenClaw 子模型
   Future<void> setOpenclawSubModel(String model) async {
@@ -957,7 +999,7 @@ $code
       'Gemini': 'makersuite.google.com',
       'GPT-4': 'platform.openai.com',
       'Claude': 'console.anthropic.com',
-      'OpenClaw': 'https://47.92.220.102',
+      'OpenClaw': '',  // 将在初始化时从配置加载
     };
     return urls[modelName] ?? '';
   }

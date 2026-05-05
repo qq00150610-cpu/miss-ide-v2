@@ -7,7 +7,8 @@ set -e
 echo "=== Miss IDE Build Server 部署 ==="
 
 # 配置
-SERVER_IP="47.92.220.102"
+# ⚠️ 重要：部署前修改以下配置
+SERVER_IP="your-server-ip"  # 修改为你的服务器IP
 BUILD_DIR="/opt/build-server"
 FLUTTER_PATH="/opt/flutter/bin/flutter"
 ANDROID_HOME="/opt/android-sdk"

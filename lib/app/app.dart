@@ -1,13 +1,12 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'theme.dart';
 import 'package:miss_ide/features/editor/code_editor.dart';
 import 'package:miss_ide/features/ai/ai_chat.dart';
 import 'package:miss_ide/features/settings/settings_page.dart';
 import 'package:miss_ide/features/file_manager/file_browser.dart';
-import 'package:miss_ide/features/project/project_page.dart';
 import 'package:miss_ide/features/build/build.dart';
+import 'core/logger.dart';
 
 /// 全局主题模式通知器
 final ValueNotifier<ThemeMode> themeModeNotifier = ValueNotifier(ThemeMode.system);
@@ -54,23 +53,23 @@ class MainPageState extends State<MainPage> {
   int _currentIndex = 0;
   String? _currentProjectPath;
   String? _currentProjectName;
-  bool _showProjectDetail = false;
-  String? _currentFilePath; // 当前选中的文件路径
+  String? _currentFilePath;
 
   void _onProjectSelected(String path, String name) {
+    MissLogger.info('App', '打开项目: $name ($path)');
     setState(() {
       _currentProjectPath = path;
       _currentProjectName = name;
-      _showProjectDetail = true; // 显示项目详情页面
-      _currentIndex = 1; // 切换到编辑器页面
+      _currentFilePath = null;
+      _currentIndex = 1; // 切换到编辑器
     });
   }
 
-  /// 关闭项目详情，返回项目列表
-  void _closeProjectDetail() {
+  void _onFileSelected(String filePath) {
+    MissLogger.info('App', '打开文件: $filePath');
     setState(() {
-      _showProjectDetail = false;
-      _currentIndex = 0; // 返回项目列表
+      _currentFilePath = filePath;
+      _currentIndex = 1; // 切换到编辑器
     });
   }
 
@@ -80,45 +79,31 @@ class MainPageState extends State<MainPage> {
       body: IndexedStack(
         index: _currentIndex,
         children: [
-          // 项目列表页面
+          // Tab 0: 项目列表
           FileBrowserPage(onProjectSelected: _onProjectSelected),
-          // 项目详情页面（文件/进程/历史）
-          if (_showProjectDetail && _currentProjectPath != null)
-            ProjectPage(
-              projectPath: _currentProjectPath!,
-              onFileSelected: (filePath) {
-                // 打开文件并切换到编辑器
-                setState(() {
-                  _showProjectDetail = false;
-                  _currentFilePath = filePath;
-                  _currentIndex = 1; // 切换到编辑器页面
-                });
-              },
-              onClose: _closeProjectDetail,
-            )
-          else if (_currentProjectPath != null)
-            CodeEditorPage(
-              projectPath: _currentProjectPath,
-              filePath: _currentFilePath,
-            )
-          else
-            const CodeEditorPage(),
-          // 其他页面保持不变
+          
+          // Tab 1: 编辑器（含项目目录侧边栏）
+          _currentProjectPath != null
+              ? CodeEditorPage(
+                  projectPath: _currentProjectPath,
+                  filePath: _currentFilePath,
+                )
+              : const _NoProjectPlaceholder(),
+          
+          // Tab 2: 构建
           const BuildPage(),
+          
+          // Tab 3: AI 助手
           AIChatPage(projectPath: _currentProjectPath),
+          
+          // Tab 4: 设置
           const SettingsPage(),
         ],
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _currentIndex,
         onDestinationSelected: (index) {
-          setState(() {
-            _currentIndex = index;
-            // 如果切换到编辑页面且有项目，显示项目详情
-            if (index == 1 && _currentProjectPath != null) {
-              _showProjectDetail = true;
-            }
-          });
+          setState(() => _currentIndex = index);
         },
         destinations: const [
           NavigationDestination(
@@ -147,6 +132,50 @@ class MainPageState extends State<MainPage> {
             label: '设置',
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// 未选择项目时的占位页面
+class _NoProjectPlaceholder extends StatelessWidget {
+  const _NoProjectPlaceholder();
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('代码编辑器'),
+      ),
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.code_off, size: 64, color: Colors.grey.shade400),
+            const SizedBox(height: 16),
+            Text(
+              '请先选择或创建项目',
+              style: TextStyle(fontSize: 18, color: Colors.grey.shade500),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '点击下方「项目」标签浏览或导入项目',
+              style: TextStyle(fontSize: 14, color: Colors.grey.shade400),
+            ),
+            const SizedBox(height: 24),
+            FilledButton.icon(
+              onPressed: () {
+                // 发给主页面消息切换标签
+                final messenger = ScaffoldMessenger.of(context);
+                messenger.showSnackBar(
+                  const SnackBar(content: Text('请点击底部「项目」标签打开项目')),
+                );
+              },
+              icon: const Icon(Icons.folder_open),
+              label: const Text('浏览项目'),
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -1,2 +1,36 @@
+# Build outputs
 build/
+
+# Dart tooling
 .dart_tool/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Flutter
+.flutter/
+.flutter-plugins
+.flutter-plugins-dependencies
+
+# Config
+.config/
+local.properties
+
+# Secrets
+*.key
+*.keystore
+*.jks
+*.p12
+**/secrets_*
+**/*_secret*
+
+# Environment
+.env
+.env.local
+.env.production

@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'ai_service.dart';
 import 'file_operation_service.dart';
 import '../file_manager/project_directory.dart';
+import '../../core/logger.dart';
 
 class AIChatPage extends StatefulWidget {
   final Function(String)? onNavigateToEditor;
@@ -1089,6 +1090,9 @@ class _AIChatPageState extends State<AIChatPage> {
         result = await aiService.createProject(projectPath, template);
       }
 
+      // 将项目添加到最近项目列表（确保在项目页中可见）
+      await _addToRecentProjects(projectPath, name, template);
+
       _addMessage(ChatMessage(
         text: result,
         isUser: false,
@@ -1100,6 +1104,35 @@ class _AIChatPageState extends State<AIChatPage> {
         isUser: false,
         time: _getCurrentTime(),
       ));
+    }
+  }
+
+  /// 将AI创建的项目添加到最近项目列表
+  Future<void> _addToRecentProjects(String projectPath, String name, String template) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final projects = prefs.getStringList('recent_projects') ?? [];
+      
+      // 确定项目类型
+      String projectType = 'flutter';
+      if (template.contains('python') || template.toLowerCase().contains('python')) {
+        projectType = 'python';
+      } else if (template.contains('node') || template.contains('js')) {
+        projectType = 'nodejs';
+      } else if (template.contains('android') || template.contains('java')) {
+        projectType = 'android';
+      }
+      
+      final projectEntry = '$name|||$projectPath|||$projectType|||${DateTime.now().toString().substring(0, 10)}';
+      
+      // 移除重复的
+      projects.removeWhere((p) => p.contains('|||$projectPath|||'));
+      projects.insert(0, projectEntry);
+      
+      await prefs.setStringList('recent_projects', projects);
+      MissLogger.info('AIChat', '项目已添加到最近项目列表: $name');
+    } catch (e) {
+      MissLogger.error('AIChat', '添加项目到最近列表失败: $e');
     }
   }
 

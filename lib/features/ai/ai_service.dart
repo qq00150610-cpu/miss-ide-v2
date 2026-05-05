@@ -530,7 +530,7 @@ void main() {
       
       if (matches.isEmpty) {
         // 没有找到文件格式，尝试 Markdown 代码块格式作为 fallback
-        final codeBlockPattern = RegExp(r'```[\w]*\s*([^\s]+)\n([\s\S]*?)```', multiLine: true);
+        final codeBlockPattern = RegExp(r'```(\w*)\s*\n?([\s\S]*?)```', multiLine: true);
         final codeMatches = codeBlockPattern.allMatches(response);
         
         if (codeMatches.isEmpty) {
@@ -542,21 +542,60 @@ void main() {
         final dir = Directory(projectPath);
         await dir.create(recursive: true);
         
+        // 语言到扩展名的映射
+        const langExtMap = {
+          'dart': '.dart', 'python': '.py', 'py': '.py',
+          'java': '.java', 'javascript': '.js', 'js': '.js',
+          'typescript': '.ts', 'ts': '.ts', 'kotlin': '.kt',
+          'swift': '.swift', 'go': '.go', 'rust': '.rs',
+          'c': '.c', 'cpp': '.cpp', 'c++': '.cpp',
+          'html': '.html', 'css': '.css', 'json': '.json',
+          'xml': '.xml', 'yaml': '.yaml', 'yml': '.yml',
+          'sql': '.sql', 'shell': '.sh', 'bash': '.sh',
+          'markdown': '.md', 'md': '.md',
+        };
+        
+        // 尝试从用户输入中提取项目类型
+        String projectType = 'dart';
+        if (description.contains('flutter') || description.contains('dart')) {
+          projectType = 'dart';
+        } else if (description.contains('python') || description.contains('py')) {
+          projectType = 'python';
+        } else if (description.contains('java')) {
+          projectType = 'java';
+        } else if (description.contains('node') || description.contains('js')) {
+          projectType = 'javascript';
+        }
+        
+        int fileIndex = 1;
         for (final match in codeMatches) {
-          var filePath = match.group(1)?.trim() ?? '';
+          var langOrPath = match.group(1)?.trim() ?? '';
           final content = match.group(2)?.trim() ?? '';
           
-          if (filePath.isNotEmpty && content.isNotEmpty) {
-            // 去掉可能的项目名前缀
-            if (filePath.startsWith('$projectName/')) {
-              filePath = filePath.substring(projectName.length + 1);
+          if (content.isEmpty || content.length < 10) continue;
+          
+          String fileName;
+          String ext;
+          
+          if (langOrPath.contains('.') || langOrPath.contains('/')) {
+            // 有文件路径，直接使用
+            fileName = p.basename(langOrPath);
+            ext = '';
+          } else {
+            // 只有语言标记，生成文件名
+            ext = langExtMap[langOrPath.toLowerCase()] ?? langExtMap[projectType] ?? '.txt';
+            final baseName = projectType == 'dart' ? 'main' : 'index';
+            fileName = '$baseName$ext';
+            if (codeMatches.length > 1) {
+              fileName = '${baseName}_$fileIndex$ext';
             }
-            
-            final fullPath = p.join(projectPath, filePath);
-            final file = File(fullPath);
-            await file.parent.create(recursive: true);
-            await file.writeAsString(content);
           }
+          
+          final fullPath = p.join(projectPath, fileName);
+          final file = File(fullPath);
+          await file.parent.create(recursive: true);
+          await file.writeAsString(content);
+          fileIndex++;
         }
         
         onProjectCreated?.call(projectPath);

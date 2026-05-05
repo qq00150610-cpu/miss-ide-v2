@@ -2022,8 +2022,14 @@ $contextFilesContent
         
         if (code.isEmpty || code.length < 10) continue; // 跳过太短的代码
         
-        // 根据语言确定文件扩展名
-        final extension = fileOperationService.getExtension(language);
+        // 根据语言确定文件扩展名，如果语言未知则从代码内容推断
+        String extension = fileOperationService.getExtension(language);
+        if (extension == '.txt' && code.isNotEmpty) {
+          final inferredExt = fileOperationService.inferExtensionFromCodeContent(code);
+          if (inferredExt != '.txt') {
+            extension = inferredExt;
+          }
+        }
         
         // 尝试从代码中提取文件名
         String fileName = '$baseName$fileIndex.$extension';

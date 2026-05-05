@@ -304,6 +304,7 @@ class FileOperationService {
   String getExtension(String language) {
     const extensions = {
       'dart': '.dart',
+      'flutter': '.dart',  // 用户可能写 flutter 而非 dart
       'python': '.py',
       'python3': '.py',
       'java': '.java',
@@ -336,6 +337,43 @@ class FileOperationService {
       'text': '.txt',
     };
     return extensions[language.toLowerCase()] ?? '.txt';
+  }
+  
+  /// 从代码内容推断语言（无语言标记时的后备方案）
+  String inferExtensionFromCodeContent(String code) {
+    if (code.contains('import \'package:flutter') || 
+        (code.contains('void main()') && code.contains('runApp'))) {
+      return '.dart';
+    }
+    if (code.contains('import \'dart:') || 
+        (code.contains('class ') && code.contains('extends'))) {
+      return '.dart';
+    }
+    if (code.contains('def ') || code.contains('__name__ == "__main__"')) {
+      return '.py';
+    }
+    if (code.contains('public static void main') || code.contains('public class ')) {
+      return '.java';
+    }
+    if (code.trimLeft().startsWith('<!DOCTYPE html') || code.contains('<html')) {
+      return '.html';
+    }
+    if (code.contains('function ') || code.contains('=>') || code.contains('require(')) {
+      return '.js';
+    }
+    if (code.contains('package main') && code.contains('func main()')) {
+      return '.go';
+    }
+    if (code.contains('fn main()') || code.contains('println!')) {
+      return '.rs';
+    }
+    if (code.contains('name:') && (code.contains('dependencies:') || code.contains('flutter:'))) {
+      return '.yaml';
+    }
+    if (code.trimLeft().startsWith('{') || code.trimLeft().startsWith('[')) {
+      return '.json';
+    }
+    return '.txt';
   }
 
   /// 从文件路径推断语言

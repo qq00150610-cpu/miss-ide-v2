@@ -1378,8 +1378,22 @@ $code
         if (saveDir.isEmpty) return;
       }
       
-      // 生成文件名
-      final extension = _getExtension(_pendingLanguage ?? 'txt');
+      // 生成文件名 — 优先用语言类型，其次从代码内容智能推断
+      String extension;
+      if (_pendingLanguage != null) {
+        extension = _getExtension(_pendingLanguage!);
+      } else if (_pendingCode != null) {
+        extension = _inferExtensionFromCode(_pendingCode!);
+      } else {
+        extension = 'txt';
+      }
+      // 如果语言类型推断结果还是txt，尝试从代码内容推断
+      if (extension == 'txt' && _pendingCode != null) {
+        final inferred = _inferExtensionFromCode(_pendingCode!);
+        if (inferred != 'txt') {
+          extension = inferred;
+        }
+      }
       final timestamp = DateTime.now().millisecondsSinceEpoch;
       String fileName = 'generated_code_$timestamp.$extension';
       
@@ -1434,6 +1448,7 @@ $code
       'python': 'py',
       'java': 'java',
       'javascript': 'js',
+      'typescript': 'ts',
       'go': 'go',
       'rust': 'rs',
       'c': 'c',
@@ -1441,9 +1456,83 @@ $code
       'ruby': 'rb',
       'swift': 'swift',
       'kotlin': 'kt',
-      'typescript': 'ts',
+      'html': 'html',
+      'css': 'css',
+      'json': 'json',
+      'yaml': 'yaml',
+      'xml': 'xml',
+      'sql': 'sql',
+      'shell': 'sh',
+      'bash': 'sh',
+      'markdown': 'md',
     };
     return extensions[language.toLowerCase()] ?? 'txt';
+  }
+  
+  /// 从代码内容智能推断文件扩展名
+  String _inferExtensionFromCode(String code) {
+    // 检查 Dart
+    if (code.contains('import \'package:flutter') || 
+        (code.contains('void main()') && code.contains('runApp'))) {
+      return 'dart';
+    }
+    if (code.contains('import \'dart:') || 
+        (code.contains('class ') && code.contains('extends StatelessWidget'))) {
+      return 'dart';
+    }
+    
+    // 检查 Python
+    if (code.contains('def ') || code.contains('import ') && code.contains('print(') ||
+        code.contains('if __name__ == "__main__"') || code.contains('sys.argv')) {
+      return 'py';
+    }
+    
+    // 检查 Java
+    if (code.contains('public static void main') || 
+        (code.contains('class ') && code.contains('public class'))) {
+      return 'java';
+    }
+    
+    // 检查 JavaScript/TypeScript
+    if (code.contains('function ') || code.contains('const ') && code.contains('=>') ||
+        code.contains('module.exports') || code.contains('require(')) {
+      if (code.contains(': string') || code.contains(': number') || code.contains('interface ')) {
+        return 'ts';
+      }
+      return 'js';
+    }
+    
+    // 检查 HTML
+    if (code.contains('<!DOCTYPE html') || code.contains('<html') && code.contains('<head')) {
+      return 'html';
+    }
+    
+    // 检查 Go
+    if (code.contains('package main') && code.contains('func main()')) {
+      return 'go';
+    }
+    
+    // 检查 Rust
+    if (code.contains('fn main()') || code.contains('println!')) {
+      return 'rs';
+    }
+    
+    // 检查 YAML
+    if (code.contains('name:') && (code.contains('dependencies:') || code.contains('flutter:'))) {
+      return 'yaml';
+    }
+    
+    // 检查 JSON
+    if (code.trimLeft().startsWith('{') || code.trimLeft().startsWith('[')) {
+      try {
+        // 简单检测是否为JSON
+        if (code.contains('"') && (code.contains(':') || code.contains(','))) {
+          return 'json';
+        }
+      } catch (_) {}
+    }
+    
+    return 'txt';
   }
 
   String _getCurrentTime() {

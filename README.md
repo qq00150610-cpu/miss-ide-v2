@@ -1,4 +1,4 @@
-# Miss IDE v2
+# Miss IDE v2 
 
 > 🎯 移动端智能集成开发环境 - 让开发随手可及
 
@@ -217,7 +217,7 @@ msdk
 
 ## 📄 许可证
 
-Miss IDE 采用 Apache 2.0 许可证开源。
+Miss IDE 采用 Apache 2.0 许可证开源
 
 ## 📞 反馈
 
